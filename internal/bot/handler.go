@@ -57,9 +57,14 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) {
 
 	switch {
 	case strings.HasPrefix(msg.Text, "/start"):
-		b.store.UpsertClient(ctx, msg.From.ID)
+		isNew, _ := b.store.UpsertClient(ctx, msg.From.ID)
 		if parts := strings.Fields(msg.Text); len(parts) == 2 && strings.HasPrefix(parts[1], "ref_") {
 			sess.ReferralCode = strings.TrimPrefix(parts[1], "ref_")
+		}
+		if isNew {
+			b.notifier.NotifyNewUser(msg.From.ID, msg.From.UserName, msg.From.FirstName, sess.ReferralCode)
+		} else {
+			b.notifier.NotifyReturningUser(msg.From.ID, msg.From.UserName, msg.From.FirstName)
 		}
 		b.sendWelcome(chatID)
 		sess.Step = ""
@@ -127,6 +132,7 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 		}
 		sess.PackageID = pkgID
 		sess.Step = "awaiting_link"
+		b.notifier.NotifyPackageSelected(cb.From.ID, cb.From.UserName, pkg)
 
 		b.sendText(chatID, fmt.Sprintf(
 			"%s *%s*\n\n📦 %s\n💰 Price: *KES %d*\n%s\n\n✏️ *Step 1 of 4* — Paste your %s profile link:\n\n_Make sure your account is set to Public_",
@@ -396,6 +402,7 @@ func (b *Bot) handlePhoneSubmission(ctx context.Context, chatID, userID int64, p
 	))
 
 	go b.initiatePayment(context.Background(), chatID, orderID, pkg.PriceKES, normalized, phone)
+	b.notifier.NotifyOrderCreated(orderID, userID, "", pkg, phone)
 	sess.Step = ""
 }
 
@@ -526,7 +533,7 @@ func (b *Bot) sendStats(ctx context.Context, chatID int64) {
 }
 
 func (b *Bot) sendReferralInfo(ctx context.Context, chatID, telegramID int64) {
-	b.store.UpsertClient(ctx, telegramID)
+	b.store.UpsertClient(ctx, telegramID) //nolint:errcheck
 
 	code, err := b.store.GetOrCreateReferralCode(ctx, telegramID)
 	if err != nil {

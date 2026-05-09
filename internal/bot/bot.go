@@ -12,7 +12,7 @@ import (
 )
 
 type Store interface {
-	UpsertClient(ctx context.Context, telegramID int64) error
+	UpsertClient(ctx context.Context, telegramID int64) (bool, error)
 	CreatePendingOrder(ctx context.Context, clientTelegramID int64, packageID, link string, amountKES int, referralCode string) (int64, error)
 	SaveSTKRequest(ctx context.Context, orderID int64, phone, stkRequestID string) error
 	ConfirmTransaction(ctx context.Context, orderID, confirmedBy int64) error
@@ -35,14 +35,15 @@ type Bot struct {
 	store          Store
 	adminIDs       []int64
 	proofChannelID int64
+	notifier       *AdminNotifier // nil = disabled
 }
 
-func New(token string, wiz *smmwiz.Client, pay *megapay.Client, store Store, adminIDs []int64, proofChannelID int64) (*Bot, error) {
+func New(token string, wiz *smmwiz.Client, pay *megapay.Client, store Store, adminIDs []int64, proofChannelID int64, notifier *AdminNotifier) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, err
 	}
-	return &Bot{api: api, wiz: wiz, pay: pay, store: store, adminIDs: adminIDs, proofChannelID: proofChannelID}, nil
+	return &Bot{api: api, wiz: wiz, pay: pay, store: store, adminIDs: adminIDs, proofChannelID: proofChannelID, notifier: notifier}, nil
 }
 
 func (b *Bot) Run(ctx context.Context) {
@@ -138,6 +139,8 @@ func (b *Bot) fulfillOrder(ctx context.Context, orderID int64) {
 	if err := b.store.UpdateOrderStatus(ctx, orderID, models.StatusProcessing, wizIDs); err != nil {
 		log.Printf("fulfillOrder updateStatus %d: %v", orderID, err)
 	}
+
+	b.notifier.NotifyOrderFulfilled(orderID, pkg, wizIDs)
 }
 
 // componentLabel returns a human-readable label for a package component.

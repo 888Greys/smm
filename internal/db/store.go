@@ -28,13 +28,13 @@ func (s *Store) Close() {
 	s.pool.Close()
 }
 
-// UpsertClient ensures a client row exists. Safe to call on every /start.
-func (s *Store) UpsertClient(ctx context.Context, telegramID int64) error {
-	_, err := s.pool.Exec(ctx, `
+// UpsertClient ensures a client row exists. Returns true if the client is new.
+func (s *Store) UpsertClient(ctx context.Context, telegramID int64) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
 		INSERT INTO clients (telegram_id) VALUES ($1)
 		ON CONFLICT (telegram_id) DO NOTHING
 	`, telegramID)
-	return err
+	return tag.RowsAffected() == 1, err
 }
 
 func (s *Store) CreatePendingOrder(ctx context.Context, clientTelegramID int64, packageID, link string, amountKES int, referralCode string) (int64, error) {

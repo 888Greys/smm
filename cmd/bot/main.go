@@ -39,7 +39,24 @@ func main() {
 		proofChannelID, _ = strconv.ParseInt(ch, 10, 64)
 	}
 
-	b, err := bot.New(mustEnv("TELEGRAM_BOT_TOKEN"), wiz, pay, store, adminIDs, proofChannelID)
+	// Optional admin notifier bot — set both vars to enable traffic tracking
+	var notifier *bot.AdminNotifier
+	adminBotToken := os.Getenv("ADMIN_BOT_TOKEN")
+	adminChatIDStr := os.Getenv("ADMIN_CHAT_ID")
+	if adminBotToken != "" && adminChatIDStr != "" {
+		adminChatID, err := strconv.ParseInt(adminChatIDStr, 10, 64)
+		if err != nil {
+			log.Fatalf("ADMIN_CHAT_ID invalid: %v", err)
+		}
+		notifier, err = bot.NewAdminNotifier(adminBotToken, adminChatID)
+		if err != nil {
+			log.Fatalf("admin notifier: %v", err)
+		}
+	} else {
+		log.Println("admin notifier disabled (ADMIN_BOT_TOKEN / ADMIN_CHAT_ID not set)")
+	}
+
+	b, err := bot.New(mustEnv("TELEGRAM_BOT_TOKEN"), wiz, pay, store, adminIDs, proofChannelID, notifier)
 	if err != nil {
 		log.Fatalf("bot init: %v", err)
 	}
