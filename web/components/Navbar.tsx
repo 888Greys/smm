@@ -11,14 +11,8 @@ export default function Navbar() {
     <nav className="fixed top-0 left-0 right-0 z-50 glass border-b border-white/5">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-gradient-brand flex items-center justify-center shadow-lg shadow-violet-900/40">
-            {/* Lightning bolt SVG — sharper than lucide for branding */}
-            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M8.5 1L2 9h6l-1.5 5L14 6H8L8.5 1Z" fill="white" />
-            </svg>
-          </div>
-          <span className="font-black text-lg tracking-tight text-white">
+        <Link href="/" className="flex items-center">
+          <span className="font-black text-xl tracking-tight text-white">
             Vector<span className="gradient-text">Boost</span>
           </span>
         </Link>

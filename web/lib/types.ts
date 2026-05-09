@@ -22,3 +22,14 @@ export interface OrderStatus {
   created_at: string
   error?: string
 }
+
+export interface ProfileInfo {
+  platform: string
+  username: string
+  name: string
+  bio: string
+  followers: string
+  profile_url: string
+  avatar_url: string
+  found: boolean
+}

@@ -17,13 +17,8 @@ export default function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-10 mb-10">
           {/* Brand */}
           <div className="md:col-span-2">
-            <div className="flex items-center gap-2.5 mb-4">
-              <div className="w-8 h-8 rounded-lg bg-gradient-brand flex items-center justify-center shadow-lg shadow-violet-900/40">
-                <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M8.5 1L2 9h6l-1.5 5L14 6H8L8.5 1Z" fill="white" />
-                </svg>
-              </div>
-              <span className="font-black text-lg text-white">
+            <div className="mb-4">
+              <span className="font-black text-xl text-white">
                 Vector<span className="gradient-text">Boost</span>
               </span>
             </div>

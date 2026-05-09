@@ -21,6 +21,7 @@ import (
 	"github.com/aapom/smm/internal/db"
 	"github.com/aapom/smm/internal/megapay"
 	"github.com/aapom/smm/internal/models"
+	"github.com/aapom/smm/internal/profile"
 	"github.com/aapom/smm/internal/smmwiz"
 )
 
@@ -47,6 +48,7 @@ func main() {
 	mux.HandleFunc("/api/packages", packagesHandler())
 	mux.HandleFunc("/api/orders", ordersHandler(store, pay))
 	mux.HandleFunc("/api/orders/", orderStatusHandler(store)) // /api/orders/:id
+	mux.HandleFunc("/api/profile", profileLookupHandler())
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -249,6 +251,29 @@ func orderStatusHandler(store *db.Store) http.HandlerFunc {
 			PriceKES:    order.TotalKES,
 			CreatedAt:   order.CreatedAt.Format(time.RFC3339),
 		})
+	}
+}
+
+// ── Profile lookup ────────────────────────────────────────────────────────────
+
+func profileLookupHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		platform := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("platform")))
+		username := strings.TrimSpace(r.URL.Query().Get("username"))
+		if platform == "" || username == "" {
+			jsonError(w, "platform and username required", http.StatusBadRequest)
+			return
+		}
+		info, err := profile.Lookup(platform, username)
+		if err != nil {
+			jsonError(w, "lookup failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, info)
 	}
 }
 

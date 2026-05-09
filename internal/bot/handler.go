@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/aapom/smm/internal/profile"
 )
 
 type sessionState struct {
@@ -135,7 +136,7 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 		b.notifier.NotifyPackageSelected(cb.From.ID, cb.From.UserName, pkg)
 
 		b.sendText(chatID, fmt.Sprintf(
-			"%s *%s*\n\n📦 %s\n💰 Price: *KES %d*\n%s\n\n✏️ *Step 1 of 4* — Paste your %s profile link:\n\n_Make sure your account is set to Public_",
+			"%s *%s*\n\n📦 %s\n💰 Price: *KES %d*\n%s\n\n✏️ *Step 1 of 4* — Enter your %s username:\n\n_Just your username, e.g._ `yourhandle` _(no @ needed)_\n_Make sure your profile is Public_",
 			platformEmoji(string(pkg.Platform)),
 			pkg.Name,
 			pkg.Description,
@@ -264,14 +265,8 @@ func categoryHeader(cat string) string {
 
 // ── Order flow ────────────────────────────────────────────────────────────────
 
-func (b *Bot) handleLinkSubmission(ctx context.Context, chatID, userID int64, link string, sess *sessionState) {
-	link = strings.TrimSpace(link)
-	if !isValidLink(link) {
-		b.sendText(chatID, "⚠️ That doesn't look like a valid link.\n\nPlease paste the full URL, e.g:\n`https://instagram.com/yourprofile`")
-		return
-	}
-	sess.ProfileLink = link
-	sess.Step = "awaiting_confirm"
+func (b *Bot) handleLinkSubmission(ctx context.Context, chatID, userID int64, input string, sess *sessionState) {
+	input = strings.TrimSpace(input)
 
 	pkg, ok := GetPackage(sess.PackageID)
 	if !ok {
@@ -280,7 +275,23 @@ func (b *Bot) handleLinkSubmission(ctx context.Context, chatID, userID int64, li
 		return
 	}
 
-	b.sendSafetyBriefing(chatID, pkg, link)
+	var profileLink string
+	if isValidLink(input) {
+		// User pasted a full URL — accept it directly
+		profileLink = input
+	} else {
+		// Treat as a username — construct the URL
+		username := strings.TrimPrefix(input, "@")
+		if len(username) < 2 || strings.ContainsAny(username, " /\\?#") {
+			b.sendText(chatID, "⚠️ That doesn't look right.\n\nPlease enter just your username, e.g:\n`yourhandle`")
+			return
+		}
+		profileLink = profile.ProfileURL(string(pkg.Platform), username)
+	}
+
+	sess.ProfileLink = profileLink
+	sess.Step = "awaiting_confirm"
+	b.sendSafetyBriefing(chatID, pkg, profileLink)
 }
 
 func (b *Bot) sendSafetyBriefing(chatID int64, pkg Package, link string) {

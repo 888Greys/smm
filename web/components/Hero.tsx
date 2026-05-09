@@ -129,17 +129,17 @@ export default function Hero() {
         </div>
 
         {/* Platform pills */}
-        <div className="flex items-center justify-center gap-3 mb-8 animate-fade-up" style={{ animationDelay: '0.1s' }}>
+        <div className="flex flex-wrap items-center justify-center gap-2 mb-8 animate-fade-up" style={{ animationDelay: '0.1s' }}>
           {platforms.map(({ Icon, label, bg, border }) => (
-            <div key={label} className={`flex items-center gap-2 px-4 py-2 rounded-full ${bg} border ${border} text-white text-sm font-semibold shadow-lg`}>
-              <Icon size={15} className="text-white" />
+            <div key={label} className={`flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-full ${bg} border ${border} text-white text-xs sm:text-sm font-semibold shadow-lg`}>
+              <Icon size={13} className="text-white" />
               {label}
             </div>
           ))}
         </div>
 
         {/* Heading with typewriter */}
-        <h1 className="text-5xl sm:text-6xl md:text-7xl font-black leading-[1.05] tracking-tight mb-6 animate-fade-up" style={{ animationDelay: '0.2s' }}>
+        <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-black leading-[1.05] tracking-tight mb-6 animate-fade-up" style={{ animationDelay: '0.2s' }}>
           Grow Your <Typewriter />
           <br />
           <span className="text-white">in Minutes</span>

@@ -1,4 +1,4 @@
-import { Package, CreateOrderResponse, OrderStatus } from './types'
+import { Package, CreateOrderResponse, OrderStatus, ProfileInfo } from './types'
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'https://api.innbucks.org'
 
@@ -24,5 +24,11 @@ export async function createOrder(data: {
 
 export async function getOrderStatus(orderId: number): Promise<OrderStatus> {
   const res = await fetch(`${API}/api/orders/${orderId}`, { cache: 'no-store' })
+  return res.json()
+}
+
+export async function lookupProfile(platform: string, username: string): Promise<ProfileInfo> {
+  const res = await fetch(`${API}/api/profile?platform=${encodeURIComponent(platform)}&username=${encodeURIComponent(username)}`, { cache: 'no-store' })
+  if (!res.ok) throw new Error('lookup failed')
   return res.json()
 }
