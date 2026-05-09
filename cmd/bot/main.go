@@ -11,6 +11,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/aapom/smm/internal/bot"
+	"github.com/aapom/smm/internal/db"
 	"github.com/aapom/smm/internal/smmwiz"
 )
 
@@ -21,21 +22,25 @@ func main() {
 
 	tgToken := mustEnv("TELEGRAM_BOT_TOKEN")
 	wizKey := mustEnv("SMMWIZ_API_KEY")
-	adminStr := mustEnv("ADMIN_TELEGRAM_IDS") // comma-separated
+	adminStr := mustEnv("ADMIN_TELEGRAM_IDS")
 
 	adminIDs := parseAdminIDs(adminStr)
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	store, err := db.NewStore(ctx, mustEnv("DATABASE_URL"))
+	if err != nil {
+		log.Fatalf("db: %v", err)
+	}
+	defer store.Close()
+
 	wiz := smmwiz.New(wizKey)
 
-	// TODO: wire up real DB store (see internal/db)
-	// For now pass nil — replace with db.NewStore(connString)
-	b, err := bot.New(tgToken, wiz, nil, adminIDs)
+	b, err := bot.New(tgToken, wiz, store, adminIDs)
 	if err != nil {
 		log.Fatalf("bot init: %v", err)
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	b.Run(ctx)
 	log.Println("bot stopped")
