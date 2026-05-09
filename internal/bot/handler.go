@@ -92,6 +92,9 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) {
 	case sess.Step == "awaiting_link":
 		b.handleLinkSubmission(ctx, chatID, msg.From.ID, msg.Text, sess)
 
+	case sess.Step == "awaiting_confirm":
+		b.sendText(chatID, "⬆️ Please tap the *Confirm & Pay* button above to proceed.")
+
 	case sess.Step == "awaiting_phone":
 		b.handlePhoneSubmission(ctx, chatID, msg.From.ID, msg.Text, sess)
 
@@ -126,7 +129,7 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 		sess.Step = "awaiting_link"
 
 		b.sendText(chatID, fmt.Sprintf(
-			"%s *%s*\n\n📦 %s\n💰 Price: *KES %d*\n%s\n⚡ Delivery: Under 1 hour\n\n✏️ *Step 1 of 3* — Paste your %s profile link:",
+			"%s *%s*\n\n📦 %s\n💰 Price: *KES %d*\n%s\n\n✏️ *Step 1 of 4* — Paste your %s profile link:\n\n_Make sure your account is set to Public_",
 			platformEmoji(string(pkg.Platform)),
 			pkg.Name,
 			pkg.Description,
@@ -134,6 +137,33 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 			refillLine(pkg),
 			platformName(string(pkg.Platform)),
 		))
+
+	case cb.Data == "confirm_order":
+		if sess.Step != "awaiting_confirm" || sess.PackageID == "" {
+			b.api.Send(tgbotapi.NewCallback(cb.ID, "Session expired — tap Shop to restart."))
+			return
+		}
+		// Lock in the confirmation visually
+		edit := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID,
+			cb.Message.Text+"\n\n✅ _Order confirmed — proceeding to payment..._")
+		edit.ParseMode = "Markdown"
+		b.api.Send(edit)
+
+		sess.Step = "awaiting_phone"
+		b.sendText(chatID, "📲 *Step 3 of 4* — Enter your M-Pesa number:\n\nFormat: `07XXXXXXXX` or `254XXXXXXXXX`")
+
+	case cb.Data == "change_link":
+		if sess.PackageID == "" {
+			b.sendText(chatID, "Session expired. Tap 🛍 Shop to restart.")
+			return
+		}
+		sess.Step = "awaiting_link"
+		sess.ProfileLink = ""
+		pkg, _ := GetPackage(sess.PackageID)
+		edit := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID,
+			"✏️ No problem — paste your correct "+platformName(string(pkg.Platform))+" profile link:")
+		edit.ParseMode = "Markdown"
+		b.api.Send(edit)
 
 	case strings.HasPrefix(cb.Data, "approve:"):
 		if !b.isAdmin(cb.From.ID) {
@@ -235,8 +265,107 @@ func (b *Bot) handleLinkSubmission(ctx context.Context, chatID, userID int64, li
 		return
 	}
 	sess.ProfileLink = link
-	sess.Step = "awaiting_phone"
-	b.sendText(chatID, "📲 *Step 2 of 3* — Enter your M-Pesa phone number:\n\nFormat: `07XXXXXXXX` or `254XXXXXXXXX`")
+	sess.Step = "awaiting_confirm"
+
+	pkg, ok := GetPackage(sess.PackageID)
+	if !ok {
+		b.sendText(chatID, "Something went wrong. Tap 🛍 Shop to start over.")
+		sess.Step = ""
+		return
+	}
+
+	b.sendSafetyBriefing(chatID, pkg, link)
+}
+
+func (b *Bot) sendSafetyBriefing(chatID int64, pkg Package, link string) {
+	followers := totalFollowersInPackage(pkg)
+
+	// Truncate long links for display
+	displayLink := link
+	if len(displayLink) > 45 {
+		displayLink = displayLink[:42] + "..."
+	}
+
+	var safetyBlock string
+	if followers > 1000 {
+		// ~400/day target, capped between 200 and 500 for display
+		dailyHigh := followers / (followers / 400)
+		if dailyHigh < 200 {
+			dailyHigh = 200
+		}
+		if dailyHigh > 500 {
+			dailyHigh = 500
+		}
+		dailyLow := dailyHigh - 100
+		safetyBlock = fmt.Sprintf(
+			"🚀 *Safety Protocol Active*\n"+
+				"Your *%s followers* will be drip-fed at ~*%d–%d/day* to perfectly mimic organic growth and keep your account safe from platform flags.\n",
+			formatCount(followers), dailyLow, dailyHigh,
+		)
+	} else if followers > 0 {
+		safetyBlock = fmt.Sprintf(
+			"⚡ *Fast Delivery*\nYour *%s followers* will start arriving within minutes of payment.\n",
+			formatCount(followers),
+		)
+	} else {
+		safetyBlock = "⚡ *Fast Delivery*\nYour order will start processing immediately after payment.\n"
+	}
+
+	refill := ""
+	if pkg.Refillable {
+		refill = "\n🔄 *30-Day Refill Guarantee* included — if followers drop, we top them back up automatically."
+	}
+
+	text := fmt.Sprintf(
+		"✅ *Order Prepared — Step 2 of 4*\n\n"+
+			"Here's exactly what will happen:\n\n"+
+			"📦 *%s*\n"+
+			"🔗 Profile: `%s`\n"+
+			"💰 Total: *KES %d*\n\n"+
+			"%s"+
+			"%s\n\n"+
+			"_Everything looks correct? Tap the button below to proceed to M-Pesa payment._",
+		pkg.Name,
+		displayLink,
+		pkg.PriceKES,
+		safetyBlock,
+		refill,
+	)
+
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ Confirm & Pay via M-Pesa", "confirm_order"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✏️ Change Profile Link", "change_link"),
+		),
+	)
+	if _, err := b.api.Send(msg); err != nil {
+		log.Printf("sendSafetyBriefing %d: %v", chatID, err)
+	}
+}
+
+func totalFollowersInPackage(pkg Package) int {
+	followerServices := map[int]bool{18612: true, 20888: true}
+	total := 0
+	for _, comp := range pkg.Components {
+		if followerServices[comp.ServiceID] {
+			total += comp.Quantity
+		}
+	}
+	return total
+}
+
+func formatCount(n int) string {
+	if n >= 1000 {
+		if n%1000 == 0 {
+			return fmt.Sprintf("%d,000", n/1000)
+		}
+		return fmt.Sprintf("%d,%03d", n/1000, n%1000)
+	}
+	return fmt.Sprintf("%d", n)
 }
 
 func (b *Bot) handlePhoneSubmission(ctx context.Context, chatID, userID int64, phone string, sess *sessionState) {
@@ -262,7 +391,7 @@ func (b *Bot) handlePhoneSubmission(ctx context.Context, chatID, userID int64, p
 	}
 
 	b.sendText(chatID, fmt.Sprintf(
-		"💳 *Step 3 of 3* — M-Pesa request sent to `%s`\n\n📱 Check your phone and enter your *M-Pesa PIN* to complete payment.\n\n_Order #%d · KES %d_",
+		"💳 *Step 4 of 4* — M-Pesa request sent to `%s`\n\n📱 Check your phone and enter your *M-Pesa PIN* to complete payment.\n\n_Order #%d · KES %d_",
 		phone, orderID, pkg.PriceKES,
 	))
 
