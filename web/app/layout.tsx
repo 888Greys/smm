@@ -9,14 +9,14 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
-  title: 'InnBucks SMM — Grow Your Social Media',
+  title: 'VectorBoost — Grow Your Social Media',
   description: 'Real followers, likes & views for TikTok, Instagram and YouTube. Fast delivery, affordable prices. Pay with M-Pesa.',
   keywords: 'SMM panel Kenya, buy followers Kenya, TikTok followers Nairobi, Instagram followers Kenya, M-Pesa social media',
   openGraph: {
-    title: 'InnBucks SMM — Grow Your Social Media',
+    title: 'VectorBoost — Grow Your Social Media',
     description: 'Real followers, likes & views. Pay with M-Pesa. Fast delivery.',
     url: 'https://innbucks.org',
-    siteName: 'InnBucks SMM',
+    siteName: 'VectorBoost',
     type: 'website',
   },
 }

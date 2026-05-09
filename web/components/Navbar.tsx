@@ -19,7 +19,7 @@ export default function Navbar() {
             </svg>
           </div>
           <span className="font-black text-lg tracking-tight text-white">
-            Inn<span className="gradient-text">Bucks</span>
+            Vector<span className="gradient-text">Boost</span>
           </span>
         </Link>
 

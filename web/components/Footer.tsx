@@ -24,7 +24,7 @@ export default function Footer() {
                 </svg>
               </div>
               <span className="font-black text-lg text-white">
-                Inn<span className="gradient-text">Bucks</span>
+                Vector<span className="gradient-text">Boost</span>
               </span>
             </div>
             <p className="text-slate-500 text-sm leading-relaxed max-w-xs mb-5">
@@ -85,7 +85,7 @@ export default function Footer() {
         </div>
 
         <div className="border-t border-white/5 pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="text-xs text-slate-600">© {new Date().getFullYear()} InnBucks. All rights reserved.</p>
+          <p className="text-xs text-slate-600">© {new Date().getFullYear()} VectorBoost. All rights reserved.</p>
           <p className="text-xs text-slate-700">Secure payments via M-Pesa STK Push</p>
         </div>
       </div>

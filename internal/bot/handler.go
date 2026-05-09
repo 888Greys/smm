@@ -426,7 +426,7 @@ func (b *Bot) initiatePayment(ctx context.Context, chatID, orderID int64, amount
 
 func (b *Bot) sendWelcome(chatID int64) {
 	b.sendTextWithKeyboard(chatID,
-		"👋 *Welcome to InnBucks SMM!*\n\n🚀 Grow your social media fast & affordably.\n\n"+
+		"👋 *Welcome to VectorBoost!*\n\n🚀 Grow your social media fast & affordably.\n\n"+
 			"✅ Real followers, likes & views\n"+
 			"✅ TikTok • Instagram • YouTube\n"+
 			"✅ Pay securely with M-Pesa\n"+
