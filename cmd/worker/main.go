@@ -91,12 +91,22 @@ func pollPayments(ctx context.Context, store *db.Store, pay *megapay.Client, wiz
 			continue
 		}
 
-		log.Printf("payment poll: order %d success=%s status=%s resultCode=%s msg=%s",
-			txn.OrderID, status.Success, status.Status, status.ResultCode, status.Message)
+		log.Printf("payment poll: order %d txnStatus=%s txnCode=%s receipt=%s",
+			txn.OrderID, status.TransactionStatus, status.TransactionCode, status.TransactionReceipt)
 
-		// MegaPay marks success with ResultCode "0" or status "completed"
-		paid := status.ResultCode == "0" || status.Status == "completed" || status.Success == "200"
-		if !paid {
+		switch status.TransactionStatus {
+		case "Cancelled":
+			// User cancelled — mark order cancelled so we stop polling
+			store.CancelOrder(ctx, txn.OrderID)
+			notifyClient(ctx, store, tg, txn.OrderID, "❌ Payment was cancelled. Send /start to try again.")
+			log.Printf("order %d payment cancelled by user", txn.OrderID)
+			continue
+		case "Completed":
+			if status.TransactionCode != "0" {
+				continue
+			}
+		default:
+			// Still pending
 			continue
 		}
 
@@ -107,7 +117,7 @@ func pollPayments(ctx context.Context, store *db.Store, pay *megapay.Client, wiz
 		}
 
 		// Notify admins
-		notifyAdmins(tg, adminIDs, fmt.Sprintf("💰 Payment confirmed for Order #%d — KES %d", txn.OrderID, txn.AmountKES))
+		notifyAdmins(tg, adminIDs, fmt.Sprintf("💰 Payment confirmed for Order #%d — KES %d (receipt: %s)", txn.OrderID, txn.AmountKES, status.TransactionReceipt))
 
 		// Fulfill order
 		go fulfillOrder(ctx, store, wiz, tg, txn.OrderID)

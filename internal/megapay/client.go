@@ -53,12 +53,13 @@ type StatusRequest struct {
 }
 
 type StatusResponse struct {
-	Success      string `json:"success"`
-	Message      string `json:"message"`
-	Status       string `json:"status"`
-	ResultCode   string `json:"ResultCode"`
-	Amount       string `json:"amount"`
-	Msisdn       string `json:"msisdn"`
+	ResultCode        string `json:"ResultCode"`
+	ResultDesc        string `json:"ResultDesc"`
+	TransactionStatus string `json:"TransactionStatus"`
+	TransactionCode   string `json:"TransactionCode"`
+	TransactionReceipt string `json:"TransactionReceipt"`
+	TransactionAmount string `json:"TransactionAmount"`
+	Msisdn            string `json:"Msisdn"`
 }
 
 // InitiateSTK sends an M-Pesa STK push to the client's phone
