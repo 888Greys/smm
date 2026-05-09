@@ -88,7 +88,7 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) {
 		b.sendReferralInfo(ctx, chatID, msg.From.ID)
 
 	case msg.Text == "💬 Support":
-		b.sendText(chatID, "💬 *Support*\n\nDM us directly: @workratew\n\n⏱ Response time: within 1 hour.\n\n_For order issues include your Order # in the message._")
+		b.sendText(chatID, "💬 *VectorBoost Support*\n\nDM us directly: @workratew\n\n⏱ Response time: within 1 hour.\n\n_For order issues include your Order # in the message._")
 
 	case msg.Text == "/balance" && b.isAdmin(msg.From.ID):
 		b.sendBalance(ctx, chatID)
@@ -140,7 +140,7 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 		b.notifier.NotifyPackageSelected(cb.From.ID, cb.From.UserName, pkg)
 
 		b.sendText(chatID, fmt.Sprintf(
-			"%s *%s*\n\n📦 %s\n💰 Price: *KES %d*\n%s\n\n✏️ *Step 1 of 4* — Enter your %s username:\n\n_Just your username, e.g._ `yourhandle` _(no @ needed)_\n_Make sure your profile is Public_",
+			"%s *%s*\n\n📦 %s\n💰 Price: *KES %d*\n%s\n\n✏️ *VectorBoost — Step 1 of 4*\n\nEnter your %s username:\n\n_Just your handle, e.g._ `yourhandle` _(no @ needed)_\n_Make sure your profile is Public so VectorBoost can verify it_",
 			platformEmoji(string(pkg.Platform)),
 			pkg.Name,
 			pkg.Description,
@@ -492,14 +492,14 @@ func (b *Bot) sendSafetyBriefing(chatID int64, pkg Package, link string) {
 	}
 
 	text := fmt.Sprintf(
-		"✅ *Order Prepared — Step 2 of 4*\n\n"+
+		"✅ *VectorBoost — Order Ready*\n\n"+
 			"Here's exactly what will happen:\n\n"+
 			"📦 *%s*\n"+
 			"🔗 Profile: `%s`\n"+
 			"💰 Total: *KES %d*\n\n"+
 			"%s"+
 			"%s\n\n"+
-			"_Everything looks correct? Tap the button below to proceed to M-Pesa payment._",
+			"_Everything looks correct? Tap below to proceed to M-Pesa payment._",
 		pkg.Name,
 		displayLink,
 		pkg.PriceKES,
@@ -566,7 +566,7 @@ func (b *Bot) handlePhoneSubmission(ctx context.Context, chatID, userID int64, p
 	}
 
 	b.sendText(chatID, fmt.Sprintf(
-		"💳 *Step 4 of 4* — M-Pesa request sent to `%s`\n\n📱 Check your phone and enter your *M-Pesa PIN* to complete payment.\n\n_Order #%d · KES %d_",
+		"💳 *VectorBoost — Step 4 of 4*\n\nM-Pesa request sent to `%s`\n\n📱 Check your phone and enter your *M-Pesa PIN* to complete payment.\n\n_Order #%d · KES %d_",
 		phone, orderID, pkg.PriceKES,
 	))
 
@@ -607,15 +607,15 @@ func (b *Bot) sendWelcome(chatID int64) {
 
 func (b *Bot) sendHowItWorks(chatID int64) {
 	b.sendText(chatID,
-		"❓ *How It Works*\n\n"+
+		"❓ *How VectorBoost Works*\n\n"+
 			"*1️⃣ Choose a Package*\n"+
 			"Tap 🛍 Shop, select your platform, then pick the package that fits your goal and budget.\n\n"+
-			"*2️⃣ Paste Your Profile Link*\n"+
-			"Send your public TikTok, Instagram or YouTube profile URL. Make sure your account is public.\n\n"+
+			"*2️⃣ Enter Your Username*\n"+
+			"VectorBoost verifies your public profile and shows you exactly what account will be boosted.\n\n"+
 			"*3️⃣ Pay with M-Pesa*\n"+
 			"Enter your Safaricom number. You'll receive an STK push on your phone — enter your PIN to confirm.\n\n"+
 			"*4️⃣ Delivery Starts Automatically*\n"+
-			"Our system places your order instantly. Followers and views start arriving within minutes to a few hours.\n\n"+
+			"VectorBoost places your order instantly. Followers and views start arriving within minutes to a few hours.\n\n"+
 			"*5️⃣ Get Notified When Done*\n"+
 			"You'll receive a message here when delivery is complete. Packages marked 🔄 include a 30-day refill guarantee.\n\n"+
 			"⏱ *Average delivery: Under 1 hour*\n\n"+
@@ -625,24 +625,24 @@ func (b *Bot) sendHowItWorks(chatID int64) {
 
 func (b *Bot) sendAccountSafety(chatID int64) {
 	b.sendText(chatID,
-		"🛡️ *Account Safety — Anti-Ban Protection*\n\n"+
-			"Your account safety is our #1 priority. Here's how we protect you:\n\n"+
+		"🛡️ *VectorBoost Safety — Anti-Ban Protection*\n\n"+
+			"Your account safety is VectorBoost's #1 priority. Here's how we protect you:\n\n"+
 			"✅ *Organic-Speed Delivery*\n"+
-			"We never dump thousands of followers at once. Our system delivers at a pace that looks 100% natural to Instagram and TikTok's algorithms.\n\n"+
+			"VectorBoost never dumps thousands of followers at once. Delivery happens at a pace that looks 100% natural to TikTok and Instagram's algorithms.\n\n"+
 			"✅ *Drip-Feed Technology*\n"+
 			"Large orders are split into smaller daily batches:\n"+
-			"• Followers are added at a safe rate of ~200–500 per day\n"+
-			"• This mirrors the growth pattern of viral organic content\n"+
+			"• Followers added at a safe rate of ~200–500 per day\n"+
+			"• Mirrors the growth pattern of viral organic content\n"+
 			"• No sudden spikes that trigger spam detection\n\n"+
 			"✅ *High-Quality Accounts*\n"+
-			"All our services use real-looking, aged accounts — not obvious bots with no posts or profile pictures.\n\n"+
+			"All VectorBoost services use real-looking, aged accounts — not obvious bots with no posts or profile pictures.\n\n"+
 			"✅ *30-Day Refill Guarantee*\n"+
-			"If any followers drop within 30 days, our system tops them back up automatically at no extra cost.\n\n"+
+			"If any followers drop within 30 days, VectorBoost tops them back up automatically at no extra cost.\n\n"+
 			"⚠️ *Best Practices for You:*\n"+
 			"• Keep your profile *public* during delivery\n"+
 			"• Don't change your username during an active order\n"+
 			"• Avoid buying from multiple providers at the same time\n\n"+
-			"💬 Still have questions? DM @workratew",
+			"💬 Questions? DM @workratew",
 	)
 }
 

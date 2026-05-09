@@ -70,6 +70,12 @@ export default function OrderModal({ pkg, onClose }: Props) {
     return () => { clearInterval(interval); clearTimeout(timeout) }
   }, [step, orderId])
 
+  // Lock body scroll while modal is open
+  useEffect(() => {
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = '' }
+  }, [])
+
   // Close on Escape
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
