@@ -202,14 +202,7 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 		edit.ParseMode = "Markdown"
 		b.api.Send(edit)
 
-	// fulfill: is sent by the server webhook notification — payment already confirmed
-	case strings.HasPrefix(cb.Data, "fulfill:"):
-		if !b.isAdmin(cb.From.ID) {
-			return
-		}
-		b.fulfillApprovedOrder(ctx, chatID, strings.TrimPrefix(cb.Data, "fulfill:"), cb.Message.MessageID)
-
-	// approve: kept for backward compat (manual flow) — re-confirms then fulfills
+	// approve: legacy manual flow (re-confirms then fulfills via main bot)
 	case strings.HasPrefix(cb.Data, "approve:"):
 		if !b.isAdmin(cb.From.ID) {
 			return
@@ -736,59 +729,78 @@ func (b *Bot) sendReferralInfo(ctx context.Context, chatID, telegramID int64) {
 	))
 }
 
-func (b *Bot) notifyAdmins(ctx context.Context, orderID, clientTelegramID int64, pkg Package, link string) {
-	text := fmt.Sprintf(
-		"🔔 *New Order #%d*\n\n👤 Client: %d\n📦 %s %s\n💰 KES %d\n🔗 %s",
-		orderID, clientTelegramID, platformEmoji(string(pkg.Platform)), pkg.Name, pkg.PriceKES, link,
-	)
-	for _, adminID := range b.adminIDs {
-		msg := tgbotapi.NewMessage(adminID, text)
-		msg.ParseMode = "Markdown"
-		b.api.Send(msg)
+// handleAdminCallback handles inline button taps received by the admin bot.
+func (b *Bot) handleAdminCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
+	if !b.isAdmin(cb.From.ID) {
+		return
+	}
+	msgID := cb.Message.MessageID
+	switch {
+	case strings.HasPrefix(cb.Data, "fulfill:"):
+		b.fulfillFromAdminBot(ctx, strings.TrimPrefix(cb.Data, "fulfill:"), msgID)
+	case strings.HasPrefix(cb.Data, "reject:"):
+		b.rejectFromAdminBot(ctx, strings.TrimPrefix(cb.Data, "reject:"), msgID)
 	}
 }
 
-// fulfillApprovedOrder handles the fulfill: callback — payment was already confirmed
-// by the MegaPay webhook, so we skip ConfirmTransaction and go straight to SMMWiz.
-func (b *Bot) fulfillApprovedOrder(ctx context.Context, chatID int64, orderIDStr string, msgID int) {
+func (b *Bot) fulfillFromAdminBot(ctx context.Context, orderIDStr string, msgID int) {
 	var orderID int64
 	fmt.Sscanf(orderIDStr, "%d", &orderID)
 
-	// Lock the buttons immediately so admin can't double-tap
-	edit := tgbotapi.NewEditMessageText(chatID, msgID,
-		fmt.Sprintf("⚡ *Order #%d — Fulfillment started…*\n_Sending to SMMWiz…_", orderID))
-	edit.ParseMode = "Markdown"
-	b.api.Send(edit)
+	b.notifier.EditMessage(msgID, fmt.Sprintf(
+		"⚡ *Order #%d — Fulfillment started…*\n_Sending to SMMWiz…_", orderID,
+	))
 
 	clientTgID, _ := b.store.GetClientTelegramID(ctx, orderID)
 
 	go func() {
 		b.fulfillOrder(context.Background(), orderID)
 
-		// Tell the client their drip has begun
 		if clientTgID > 0 {
-			pkg := ""
+			pkgName := ""
 			if order, err := b.store.GetOrder(context.Background(), orderID); err == nil {
 				if p, ok := GetPackage(order.PackageID); ok {
-					pkg = p.Name
+					pkgName = p.Name
 				}
 			}
-			msg := fmt.Sprintf(
+			b.sendText(clientTgID, fmt.Sprintf(
 				"🚀 *Your VectorBoost has started!*\n\n"+
 					"Order #%d (*%s*) is now live on our delivery system.\n\n"+
 					"📈 Followers will start arriving shortly and continue drip-feeding at a safe, organic pace.\n\n"+
 					"_Keep your profile public during delivery. DM @workratew if you have questions._",
-				orderID, pkg,
-			)
-			b.sendText(clientTgID, msg)
+				orderID, pkgName,
+			))
 		}
 
-		// Update admin message
-		done := tgbotapi.NewEditMessageText(chatID, msgID,
-			fmt.Sprintf("✅ *Order #%d fulfilled* — submitted to SMMWiz. Client notified.", orderID))
-		done.ParseMode = "Markdown"
-		b.api.Send(done)
+		b.notifier.EditMessage(msgID, fmt.Sprintf(
+			"✅ *Order #%d fulfilled* — submitted to SMMWiz. Client notified.", orderID,
+		))
 	}()
+}
+
+func (b *Bot) rejectFromAdminBot(ctx context.Context, orderIDStr string, msgID int) {
+	var orderID int64
+	fmt.Sscanf(orderIDStr, "%d", &orderID)
+
+	if err := b.store.CancelOrder(ctx, orderID); err != nil {
+		log.Printf("rejectFromAdminBot cancelOrder %d: %v", orderID, err)
+		b.notifier.EditMessage(msgID, fmt.Sprintf("⚠️ Failed to cancel order #%d.", orderID))
+		return
+	}
+
+	clientTgID, _ := b.store.GetClientTelegramID(ctx, orderID)
+	if clientTgID > 0 {
+		b.sendText(clientTgID, fmt.Sprintf(
+			"⚠️ *Order #%d Update*\n\n"+
+				"There was an issue processing your order. A refund will be initiated.\n\n"+
+				"Please DM @workratew for assistance.",
+			orderID,
+		))
+	}
+
+	b.notifier.EditMessage(msgID, fmt.Sprintf(
+		"❌ *Order #%d rejected* — cancelled, client notified.", orderID,
+	))
 }
 
 func (b *Bot) approveOrder(ctx context.Context, chatID, approverID int64, orderIDStr string, msgID int) {

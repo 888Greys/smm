@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"time"
@@ -8,7 +9,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// AdminNotifier sends traffic and order events to a separate admin bot/chat.
+// AdminNotifier sends all admin-facing events through a dedicated admin bot.
 type AdminNotifier struct {
 	api    *tgbotapi.BotAPI
 	chatID int64
@@ -23,6 +24,7 @@ func NewAdminNotifier(token string, chatID int64) (*AdminNotifier, error) {
 	return &AdminNotifier{api: api, chatID: chatID}, nil
 }
 
+// send sends a plain Markdown message to the admin chat.
 func (n *AdminNotifier) send(text string) {
 	if n == nil {
 		return
@@ -34,7 +36,64 @@ func (n *AdminNotifier) send(text string) {
 	}
 }
 
-// NotifyNewUser fires when a user sends /start for the first time.
+// SendWithButtons sends a message with an inline keyboard to the admin chat.
+func (n *AdminNotifier) SendWithButtons(text string, kb tgbotapi.InlineKeyboardMarkup) {
+	if n == nil {
+		return
+	}
+	msg := tgbotapi.NewMessage(n.chatID, text)
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = kb
+	if _, err := n.api.Send(msg); err != nil {
+		log.Printf("adminNotifier sendWithButtons: %v", err)
+	}
+}
+
+// EditMessage edits an existing message in the admin chat.
+func (n *AdminNotifier) EditMessage(msgID int, text string) {
+	if n == nil {
+		return
+	}
+	edit := tgbotapi.NewEditMessageText(n.chatID, msgID, text)
+	edit.ParseMode = "Markdown"
+	if _, err := n.api.Send(edit); err != nil {
+		log.Printf("adminNotifier editMessage: %v", err)
+	}
+}
+
+// AckCallback silently acknowledges a callback query.
+func (n *AdminNotifier) AckCallback(callbackID string) {
+	if n == nil {
+		return
+	}
+	n.api.Send(tgbotapi.NewCallback(callbackID, ""))
+}
+
+// StartCallbackListener runs the admin bot update loop and calls onCallback for
+// every inline button tap. Run as a goroutine alongside the main bot.
+func (n *AdminNotifier) StartCallbackListener(ctx context.Context, onCallback func(*tgbotapi.CallbackQuery)) {
+	if n == nil {
+		return
+	}
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
+	updates := n.api.GetUpdatesChan(u)
+	log.Printf("admin bot callback listener started")
+	for {
+		select {
+		case <-ctx.Done():
+			n.api.StopReceivingUpdates()
+			return
+		case update := <-updates:
+			if update.CallbackQuery != nil {
+				onCallback(update.CallbackQuery)
+			}
+		}
+	}
+}
+
+// ── Traffic notifications ─────────────────────────────────────────────────────
+
 func (n *AdminNotifier) NotifyNewUser(userID int64, username, firstName string, referralCode string) {
 	name := firstName
 	if username != "" {
@@ -42,90 +101,86 @@ func (n *AdminNotifier) NotifyNewUser(userID int64, username, firstName string, 
 	}
 	ref := ""
 	if referralCode != "" {
-		ref = fmt.Sprintf("\n🔗 Referred by code: `%s`", referralCode)
+		ref = fmt.Sprintf("\n🔗 Referred by: `%s`", referralCode)
 	}
 	n.send(fmt.Sprintf(
-		"👤 *New User*\n\n"+
-			"Name: %s\n"+
-			"ID: `%d`\n"+
-			"Time: %s%s",
+		"👤 *New User*\n\nName: %s\nID: `%d`\nTime: %s%s",
 		name, userID, time.Now().Format("02 Jan 15:04 MST"), ref,
 	))
 }
 
-// NotifyReturningUser fires when an existing user sends /start again.
 func (n *AdminNotifier) NotifyReturningUser(userID int64, username, firstName string) {
 	name := firstName
 	if username != "" {
 		name = "@" + username
 	}
 	n.send(fmt.Sprintf(
-		"🔄 *Returning User*\n\n"+
-			"Name: %s\n"+
-			"ID: `%d`\n"+
-			"Time: %s",
+		"🔄 *Returning User*\n\nName: %s\nID: `%d`\nTime: %s",
 		name, userID, time.Now().Format("02 Jan 15:04 MST"),
 	))
 }
 
-// NotifyPackageSelected fires when a user taps a package in the shop.
 func (n *AdminNotifier) NotifyPackageSelected(userID int64, username string, pkg Package) {
 	name := fmt.Sprintf("`%d`", userID)
 	if username != "" {
 		name = "@" + username
 	}
 	n.send(fmt.Sprintf(
-		"%s *Package Viewed*\n\n"+
-			"User: %s\n"+
-			"Package: *%s*\n"+
-			"Price: KES %d\n"+
-			"Time: %s",
+		"%s *Package Viewed*\n\nUser: %s\nPackage: *%s*\nPrice: KES %d\nTime: %s",
 		platformEmoji(string(pkg.Platform)),
 		name, pkg.Name, pkg.PriceKES,
 		time.Now().Format("02 Jan 15:04 MST"),
 	))
 }
 
-// NotifyOrderCreated fires when an order is created and STK push sent.
-func (n *AdminNotifier) NotifyOrderCreated(orderID int64, userID int64, username string, pkg Package, phone string) {
+func (n *AdminNotifier) NotifyOrderCreated(orderID, userID int64, username string, pkg Package, phone string) {
 	name := fmt.Sprintf("`%d`", userID)
 	if username != "" {
 		name = "@" + username
 	}
 	n.send(fmt.Sprintf(
 		"💳 *Order Created — Awaiting Payment*\n\n"+
-			"Order: #%d\n"+
-			"User: %s\n"+
-			"Package: *%s*\n"+
-			"Amount: KES %d\n"+
-			"Phone: `%s`\n"+
-			"Time: %s",
+			"Order: #%d\nUser: %s\nPackage: *%s*\nAmount: KES %d\nPhone: `%s`\nTime: %s",
 		orderID, name, pkg.Name, pkg.PriceKES, phone,
 		time.Now().Format("02 Jan 15:04 MST"),
 	))
 }
 
-// NotifyPaymentConfirmed fires when M-Pesa payment is confirmed (called from worker).
-func (n *AdminNotifier) NotifyPaymentConfirmed(orderID int64, amountKES int, receipt string) {
-	n.send(fmt.Sprintf(
-		"💰 *Payment Confirmed*\n\n"+
-			"Order: #%d\n"+
-			"Amount: KES %d\n"+
-			"Receipt: `%s`\n"+
-			"Time: %s",
-		orderID, amountKES, receipt,
+// NotifyPaymentConfirmedWithFulfill sends the payment confirmation with
+// Fulfill / Reject inline buttons. The admin bot receives the callback tap.
+func (n *AdminNotifier) NotifyPaymentConfirmedWithFulfill(orderID int64, pkg Package, clientTgID int64, profileLink, mpesaRef string) {
+	if n == nil {
+		return
+	}
+	display := profileLink
+	if len(display) > 50 {
+		display = display[:47] + "..."
+	}
+	text := fmt.Sprintf(
+		"💰 *Payment Confirmed — Order #%d*\n\n"+
+			"📦 %s\n"+
+			"💰 KES %d\n"+
+			"🔗 %s\n"+
+			"👤 Client: `%d`\n"+
+			"📱 M-Pesa ref: `%s`\n"+
+			"🕐 %s\n\n"+
+			"Tap *Fulfill* to send to SMMWiz and start delivery.",
+		orderID, pkg.Name, pkg.PriceKES,
+		display, clientTgID, mpesaRef,
 		time.Now().Format("02 Jan 15:04 MST"),
-	))
+	)
+	kb := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ Fulfill Order", fmt.Sprintf("fulfill:%d", orderID)),
+			tgbotapi.NewInlineKeyboardButtonData("❌ Reject", fmt.Sprintf("reject:%d", orderID)),
+		),
+	)
+	n.SendWithButtons(text, kb)
 }
 
-// NotifyOrderFulfilled fires when SMMWiz order is placed successfully.
 func (n *AdminNotifier) NotifyOrderFulfilled(orderID int64, pkg Package, wizIDs []int64) {
 	n.send(fmt.Sprintf(
-		"✅ *Order Fulfilled*\n\n"+
-			"Order: #%d\n"+
-			"Package: *%s*\n"+
-			"Wiz IDs: %v\n"+
-			"Time: %s",
+		"✅ *Order Fulfilled*\n\nOrder: #%d\nPackage: *%s*\nWiz IDs: %v\nTime: %s",
 		orderID, pkg.Name, wizIDs,
 		time.Now().Format("02 Jan 15:04 MST"),
 	))

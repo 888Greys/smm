@@ -53,6 +53,14 @@ func (b *Bot) Run(ctx context.Context) {
 
 	log.Printf("bot started: @%s", b.api.Self.UserName)
 
+	// Admin bot handles ALL admin-facing callbacks (fulfill:/reject:)
+	if b.notifier != nil {
+		go b.notifier.StartCallbackListener(ctx, func(cb *tgbotapi.CallbackQuery) {
+			b.notifier.AckCallback(cb.ID)
+			go b.handleAdminCallback(ctx, cb)
+		})
+	}
+
 	for {
 		select {
 		case <-ctx.Done():

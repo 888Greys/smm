@@ -38,10 +38,14 @@ func main() {
 	webhookSecret := os.Getenv("MEGAPAY_WEBHOOK_SECRET")
 	frontendOrigin := os.Getenv("FRONTEND_ORIGIN") // e.g. https://innbucks.org
 
-	// Telegram notifier — uses the main bot token to message admin + clients after payment
+	// Telegram notifier:
+	//   client messages  → main bot token  (user's chat is with the main bot)
+	//   admin messages   → admin bot token + ADMIN_CHAT_ID  (all admin traffic in one place)
+	adminChatID, _ := strconv.ParseInt(os.Getenv("ADMIN_CHAT_ID"), 10, 64)
 	tg := newTGNotifier(
-		os.Getenv("TELEGRAM_BOT_TOKEN"),
-		parseAdminIDs(os.Getenv("ADMIN_TELEGRAM_IDS")),
+		os.Getenv("TELEGRAM_BOT_TOKEN"), // used to message clients
+		os.Getenv("ADMIN_BOT_TOKEN"),    // used to message admin
+		adminChatID,
 	)
 
 	mux := http.NewServeMux()
@@ -354,53 +358,55 @@ func notifyPaymentConfirmed(ctx context.Context, store *db.Store, tg *tgNotifier
 	pkg, _ := bot.GetPackage(order.PackageID)
 	clientTgID, _ := store.GetClientTelegramID(ctx, orderID)
 
-	// Tell the client their payment is in
+	// Tell the client their payment is in (via main bot — that's where they chatted)
 	if clientTgID > 0 {
-		tg.send(clientTgID,
-			fmt.Sprintf(
-				"✅ *Payment Confirmed!*\n\n"+
-					"We've received your M-Pesa payment for *%s* (KES %d).\n\n"+
-					"🔧 Our team is reviewing your order and will kick off your boost shortly.\n"+
-					"You'll get a message here the moment delivery starts.\n\n"+
-					"_Order #%d · Ref: %s_",
-				pkg.Name, order.TotalKES, orderID, mpesaRef,
-			), nil)
+		tg.sendClient(clientTgID, fmt.Sprintf(
+			"✅ *Payment Confirmed!*\n\n"+
+				"We've received your M-Pesa payment for *%s* (KES %d).\n\n"+
+				"🔧 Our team is reviewing your order and will kick off your boost shortly.\n"+
+				"You'll get a message here the moment delivery starts.\n\n"+
+				"_Order #%d · Ref: %s_",
+			pkg.Name, order.TotalKES, orderID, mpesaRef,
+		))
 	}
 
-	// Alert admins with Fulfill / Reject buttons
+	// Alert admin via admin bot with Fulfill / Reject buttons
 	profileDisplay := order.ProfileLink
 	if len(profileDisplay) > 50 {
 		profileDisplay = profileDisplay[:47] + "..."
 	}
-	adminText := fmt.Sprintf(
-		"💰 *Payment Confirmed — Order #%d*\n\n"+
-			"📦 %s\n"+
-			"💰 KES %d\n"+
-			"🔗 %s\n"+
-			"👤 Client TG: %d\n"+
-			"📱 M-Pesa ref: `%s`\n\n"+
-			"Tap *Fulfill* to send to SMMWiz and start delivery.",
-		orderID, pkg.Name, order.TotalKES, profileDisplay, clientTgID, mpesaRef,
-	)
-	kb := &tgInlineKb{
-		InlineKeyboard: [][]tgInlineBtn{
-			{
-				{Text: "✅ Fulfill Order", CallbackData: fmt.Sprintf("fulfill:%d", orderID)},
-				{Text: "❌ Reject", CallbackData: fmt.Sprintf("reject:%d", orderID)},
+	tg.sendAdmin(
+		fmt.Sprintf(
+			"💰 *Payment Confirmed — Order #%d*\n\n"+
+				"📦 %s\n"+
+				"💰 KES %d\n"+
+				"🔗 %s\n"+
+				"👤 Client TG: `%d`\n"+
+				"📱 M-Pesa ref: `%s`\n"+
+				"🕐 %s\n\n"+
+				"Tap *Fulfill* to send to SMMWiz.",
+			orderID, pkg.Name, order.TotalKES,
+			profileDisplay, clientTgID, mpesaRef,
+			time.Now().Format("02 Jan 15:04 MST"),
+		),
+		&tgInlineKb{
+			InlineKeyboard: [][]tgInlineBtn{
+				{
+					{Text: "✅ Fulfill Order", CallbackData: fmt.Sprintf("fulfill:%d", orderID)},
+					{Text: "❌ Reject", CallbackData: fmt.Sprintf("reject:%d", orderID)},
+				},
 			},
 		},
-	}
-	for _, adminID := range tg.adminIDs {
-		tg.send(adminID, adminText, kb)
-	}
-	log.Printf("order %d payment confirmed, awaiting admin fulfillment", orderID)
+	)
+	log.Printf("order %d payment confirmed, admin notified via admin bot", orderID)
 }
 
 // ── Telegram notifier (lightweight — no library, just HTTP) ──────────────────
 
 type tgNotifier struct {
-	token    string
-	adminIDs []int64
+	mainToken  string // main bot — used to message clients
+	adminToken string // admin bot — used to message admin chat
+	adminChat  int64
 }
 
 type tgInlineKb struct {
@@ -412,15 +418,26 @@ type tgInlineBtn struct {
 	CallbackData string `json:"callback_data"`
 }
 
-func newTGNotifier(token string, adminIDs []int64) *tgNotifier {
-	if token == "" {
-		log.Println("TELEGRAM_BOT_TOKEN not set — admin payment notifications disabled")
+func newTGNotifier(mainToken, adminToken string, adminChat int64) *tgNotifier {
+	if adminToken == "" {
+		log.Println("ADMIN_BOT_TOKEN not set — admin payment notifications disabled")
 	}
-	return &tgNotifier{token: token, adminIDs: adminIDs}
+	return &tgNotifier{mainToken: mainToken, adminToken: adminToken, adminChat: adminChat}
 }
 
-func (n *tgNotifier) send(chatID int64, text string, kb *tgInlineKb) {
-	if n.token == "" {
+func (n *tgNotifier) sendClient(chatID int64, text string) {
+	n.post(n.mainToken, chatID, text, nil)
+}
+
+func (n *tgNotifier) sendAdmin(text string, kb *tgInlineKb) {
+	if n.adminToken == "" || n.adminChat == 0 {
+		return
+	}
+	n.post(n.adminToken, n.adminChat, text, kb)
+}
+
+func (n *tgNotifier) post(token string, chatID int64, text string, kb *tgInlineKb) {
+	if token == "" {
 		return
 	}
 	payload := map[string]any{
@@ -432,28 +449,17 @@ func (n *tgNotifier) send(chatID int64, text string, kb *tgInlineKb) {
 		payload["reply_markup"] = kb
 	}
 	body, _ := json.Marshal(payload)
-	url := "https://api.telegram.org/bot" + n.token + "/sendMessage"
+	url := "https://api.telegram.org/bot" + token + "/sendMessage"
 	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
-		log.Printf("tgNotifier send to %d: %v", chatID, err)
+		log.Printf("tgNotifier post to %d: %v", chatID, err)
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		log.Printf("tgNotifier send to %d: status %d: %s", chatID, resp.StatusCode, b)
+		log.Printf("tgNotifier post to %d: status %d: %s", chatID, resp.StatusCode, b)
 	}
-}
-
-func parseAdminIDs(s string) []int64 {
-	var ids []int64
-	for _, part := range strings.Split(s, ",") {
-		part = strings.TrimSpace(part)
-		if id, err := strconv.ParseInt(part, 10, 64); err == nil {
-			ids = append(ids, id)
-		}
-	}
-	return ids
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
