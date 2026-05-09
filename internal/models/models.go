@@ -26,6 +26,7 @@ type Package struct {
 	ID          string
 	Name        string
 	Platform    Platform
+	Category    string // "tiktok" | "instagram" | "youtube" | "combo"
 	PriceKES    int
 	MarginKES   int  // retail price minus wholesale cost (at ~130 KES/USD)
 	Refillable  bool // whether this package gets a 30-day refill
