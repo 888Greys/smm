@@ -14,6 +14,16 @@ import "github.com/aapom/smm/internal/models"
 
 var Catalog = []models.Package{
 	{
+		ID:          "test_ksh1",
+		Name:        "Test Package",
+		Platform:    models.PlatformTikTok,
+		PriceKES:    1,
+		Description: "Test order — KES 1 only",
+		Components: []models.PackageComponent{
+			{ServiceID: 19967, Quantity: 100}, // TikTok Views — cheapest available
+		},
+	},
+	{
 		ID:          "tiktok_viral_starter",
 		Name:        "TikTok Viral Starter",
 		Platform:    models.PlatformTikTok,
