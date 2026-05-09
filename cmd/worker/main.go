@@ -91,9 +91,12 @@ func pollPayments(ctx context.Context, store *db.Store, pay *megapay.Client, wiz
 			continue
 		}
 
-		log.Printf("payment poll: order %d status=%s", txn.OrderID, status.Status)
+		log.Printf("payment poll: order %d success=%s status=%s resultCode=%s msg=%s",
+			txn.OrderID, status.Success, status.Status, status.ResultCode, status.Message)
 
-		if status.Status != "completed" {
+		// MegaPay marks success with ResultCode "0" or status "completed"
+		paid := status.ResultCode == "0" || status.Status == "completed" || status.Success == "200"
+		if !paid {
 			continue
 		}
 

@@ -39,9 +39,10 @@ type STKRequest struct {
 }
 
 type STKResponse struct {
-	Success              bool   `json:"success"`
+	Success              string `json:"success"`
 	Message              string `json:"message"`
 	TransactionRequestID string `json:"transaction_request_id"`
+	ResponseCode         string `json:"ResponseCode"`
 }
 
 type StatusRequest struct {
@@ -51,11 +52,12 @@ type StatusRequest struct {
 }
 
 type StatusResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Status  string `json:"status"` // "pending", "completed", "failed"
-	Amount  string `json:"amount"`
-	Msisdn  string `json:"msisdn"`
+	Success      string `json:"success"`
+	Message      string `json:"message"`
+	Status       string `json:"status"`
+	ResultCode   string `json:"ResultCode"`
+	Amount       string `json:"amount"`
+	Msisdn       string `json:"msisdn"`
 }
 
 // InitiateSTK sends an M-Pesa STK push to the client's phone
@@ -72,7 +74,7 @@ func (c *Client) InitiateSTK(amountKES int, phone, reference string) (*STKRespon
 	if err := c.post(stkURL, req, &resp); err != nil {
 		return nil, err
 	}
-	if !resp.Success {
+	if resp.ResponseCode != "0" && resp.Success != "200" {
 		return nil, fmt.Errorf("megapay STK: %s", resp.Message)
 	}
 	return &resp, nil
