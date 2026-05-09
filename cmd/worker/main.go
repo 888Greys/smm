@@ -13,7 +13,9 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
+	"github.com/aapom/smm/internal/bot"
 	"github.com/aapom/smm/internal/db"
+	"github.com/aapom/smm/internal/megapay"
 	"github.com/aapom/smm/internal/models"
 	"github.com/aapom/smm/internal/smmwiz"
 )
@@ -21,13 +23,17 @@ import (
 func main() {
 	godotenv.Load()
 
-	store, err := db.NewStore(context.Background(), mustEnv("DATABASE_URL"))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	store, err := db.NewStore(ctx, mustEnv("DATABASE_URL"))
 	if err != nil {
 		log.Fatalf("db: %v", err)
 	}
 	defer store.Close()
 
 	wiz := smmwiz.New(mustEnv("SMMWIZ_API_KEY"))
+	pay := megapay.New(mustEnv("MEGAPAY_API_KEY"), mustEnv("MEGAPAY_EMAIL"))
 
 	tgAPI, err := tgbotapi.NewBotAPI(mustEnv("TELEGRAM_BOT_TOKEN"))
 	if err != nil {
@@ -38,28 +44,29 @@ func main() {
 	if balanceThreshold == 0 {
 		balanceThreshold = 5.0
 	}
-
 	adminIDs := parseAdminIDs(mustEnv("ADMIN_TELEGRAM_IDS"))
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	pollTicker := time.NewTicker(30 * time.Minute)
+	// Poll payments every 10 seconds
+	paymentTicker := time.NewTicker(10 * time.Second)
+	// Poll SMMWiz order status every 30 minutes
+	orderTicker := time.NewTicker(30 * time.Minute)
+	// Trigger refills daily
 	refillTicker := time.NewTicker(24 * time.Hour)
+	// Check balance every 12 hours
 	balanceTicker := time.NewTicker(12 * time.Hour)
 
 	log.Println("worker started")
-
-	// Run immediately on start, then on ticker
-	pollOrders(ctx, store, wiz, tgAPI)
 	checkBalance(ctx, wiz, tgAPI, adminIDs, balanceThreshold)
+	pollOrders(ctx, store, wiz, tgAPI)
 
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("worker stopped")
 			return
-		case <-pollTicker.C:
+		case <-paymentTicker.C:
+			pollPayments(ctx, store, pay, wiz, tgAPI, adminIDs)
+		case <-orderTicker.C:
 			pollOrders(ctx, store, wiz, tgAPI)
 		case <-refillTicker.C:
 			triggerRefills(ctx, store, wiz)
@@ -67,6 +74,85 @@ func main() {
 			checkBalance(ctx, wiz, tgAPI, adminIDs, balanceThreshold)
 		}
 	}
+}
+
+// pollPayments checks all pending STK transactions and fulfills confirmed ones
+func pollPayments(ctx context.Context, store *db.Store, pay *megapay.Client, wiz *smmwiz.Client, tg *tgbotapi.BotAPI, adminIDs []int64) {
+	txns, err := store.GetPendingSTKTransactions(ctx)
+	if err != nil {
+		log.Printf("getPendingSTK: %v", err)
+		return
+	}
+
+	for _, txn := range txns {
+		status, err := pay.CheckStatus(txn.STKRequestID)
+		if err != nil {
+			log.Printf("checkStatus txn %s: %v", txn.STKRequestID, err)
+			continue
+		}
+
+		log.Printf("payment poll: order %d status=%s", txn.OrderID, status.Status)
+
+		if status.Status != "completed" {
+			continue
+		}
+
+		// Mark confirmed
+		if err := store.ConfirmTransaction(ctx, txn.OrderID, 0); err != nil {
+			log.Printf("confirmTransaction order %d: %v", txn.OrderID, err)
+			continue
+		}
+
+		// Notify admins
+		notifyAdmins(tg, adminIDs, fmt.Sprintf("💰 Payment confirmed for Order #%d — KES %d", txn.OrderID, txn.AmountKES))
+
+		// Fulfill order
+		go fulfillOrder(ctx, store, wiz, tg, txn.OrderID)
+	}
+}
+
+func fulfillOrder(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *tgbotapi.BotAPI, orderID int64) {
+	order, err := store.GetOrder(ctx, orderID)
+	if err != nil {
+		log.Printf("fulfillOrder getOrder %d: %v", orderID, err)
+		return
+	}
+
+	pkg, ok := bot.GetPackage(order.PackageID)
+	if !ok {
+		log.Printf("fulfillOrder unknown package %s", order.PackageID)
+		return
+	}
+
+	var wizIDs []int64
+	for _, comp := range pkg.Components {
+		req := smmwiz.OrderRequest{
+			Service:  comp.ServiceID,
+			Link:     order.ProfileLink,
+			Quantity: comp.Quantity,
+		}
+		if comp.Runs > 0 {
+			req.Runs = comp.Runs
+			req.Interval = comp.Interval
+		}
+
+		resp, err := wiz.AddOrder(req)
+		if err != nil {
+			log.Printf("fulfillOrder AddOrder (order %d service %d): %v", orderID, comp.ServiceID, err)
+			store.UpdateOrderStatus(ctx, orderID, models.StatusFailed, wizIDs)
+			notifyClient(ctx, store, tg, orderID, "⚠️ Your order could not be placed. Please contact support.")
+			return
+		}
+		wizIDs = append(wizIDs, resp.Order)
+		log.Printf("order %d → wiz order %d placed", orderID, resp.Order)
+	}
+
+	store.UpdateOrderStatus(ctx, orderID, models.StatusProcessing, wizIDs)
+
+	// Notify client
+	notifyClient(ctx, store, tg, orderID, fmt.Sprintf(
+		"✅ *Payment confirmed!*\n\nYour order #%d has been placed and delivery has started.\n\nYou'll be notified when it's complete.", orderID,
+	))
 }
 
 func pollOrders(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *tgbotapi.BotAPI) {
@@ -79,8 +165,7 @@ func pollOrders(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *tg
 		return
 	}
 
-	// Collect all wiz order IDs across all orders
-	wizToOrder := map[int64]int64{} // wizOrderID → our orderID
+	wizToOrder := map[int64]int64{}
 	var allWizIDs []int64
 	for _, o := range orders {
 		for _, wid := range o.WizOrderIDs {
@@ -95,7 +180,6 @@ func pollOrders(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *tg
 		return
 	}
 
-	// Track which orders had all components complete
 	orderComplete := map[int64]bool{}
 	orderFailed := map[int64]bool{}
 
@@ -109,37 +193,25 @@ func pollOrders(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *tg
 			orderComplete[orderID] = true
 		case "Partial", "Canceled":
 			orderFailed[orderID] = true
-			log.Printf("order %d wiz_order %d status: %s (remains: %s)", orderID, wizID, s.Status, s.Remains)
 		}
 	}
 
 	for orderID := range orderComplete {
 		if orderFailed[orderID] {
-			continue // partial — leave in processing, keep polling
-		}
-		if err := store.UpdateOrderStatus(ctx, orderID, models.StatusCompleted, nil); err != nil {
-			log.Printf("updateStatus completed %d: %v", orderID, err)
 			continue
 		}
-		notifyClient(ctx, store, tg, orderID, "Your order is complete! Check your profile.")
+		store.UpdateOrderStatus(ctx, orderID, models.StatusCompleted, nil)
+		notifyClient(ctx, store, tg, orderID, "🎉 Your order is complete! Check your profile.")
 		log.Printf("order %d completed", orderID)
-	}
-
-	for orderID := range orderFailed {
-		if err := store.UpdateOrderStatus(ctx, orderID, models.StatusPartial, nil); err != nil {
-			log.Printf("updateStatus partial %d: %v", orderID, err)
-		}
-		log.Printf("order %d marked partial", orderID)
 	}
 }
 
 func triggerRefills(ctx context.Context, store *db.Store, wiz *smmwiz.Client) {
 	orders, err := store.GetRefillableOrders(ctx)
 	if err != nil {
-		log.Printf("triggerRefills fetch: %v", err)
+		log.Printf("triggerRefills: %v", err)
 		return
 	}
-
 	for _, o := range orders {
 		for _, wizID := range o.WizOrderIDs {
 			resp, err := wiz.Refill(wizID)
@@ -147,10 +219,8 @@ func triggerRefills(ctx context.Context, store *db.Store, wiz *smmwiz.Client) {
 				log.Printf("refill order %d wiz %d: %v", o.ID, wizID, err)
 				continue
 			}
-			if err := store.SaveRefill(ctx, o.ID, wizID, resp.Refill); err != nil {
-				log.Printf("saveRefill order %d: %v", o.ID, err)
-			}
-			log.Printf("refill triggered: order %d wiz_order %d → refill %d", o.ID, wizID, resp.Refill)
+			store.SaveRefill(ctx, o.ID, wizID, resp.Refill)
+			log.Printf("refill triggered: order %d → refill %d", o.ID, resp.Refill)
 		}
 	}
 }
@@ -161,17 +231,10 @@ func checkBalance(ctx context.Context, wiz *smmwiz.Client, tg *tgbotapi.BotAPI, 
 		log.Printf("balance check: %v", err)
 		return
 	}
-
 	balance, _ := strconv.ParseFloat(bal.Balance, 64)
 	log.Printf("SMMWiz balance: %s %s", bal.Balance, bal.Currency)
-
 	if balance < threshold {
-		msg := fmt.Sprintf("LOW BALANCE ALERT\nSMMWiz wallet: *%s %s*\nTop up now or orders will fail.", bal.Balance, bal.Currency)
-		for _, id := range adminIDs {
-			m := tgbotapi.NewMessage(id, msg)
-			m.ParseMode = "Markdown"
-			tg.Send(m)
-		}
+		notifyAdmins(tg, adminIDs, fmt.Sprintf("⚠️ *LOW BALANCE*\nSMMWiz wallet: *%s %s*\nTop up now or orders will fail.", bal.Balance, bal.Currency))
 	}
 }
 
@@ -182,7 +245,16 @@ func notifyClient(ctx context.Context, store *db.Store, tg *tgbotapi.BotAPI, ord
 		return
 	}
 	m := tgbotapi.NewMessage(tgID, text)
+	m.ParseMode = "Markdown"
 	tg.Send(m)
+}
+
+func notifyAdmins(tg *tgbotapi.BotAPI, adminIDs []int64, text string) {
+	for _, id := range adminIDs {
+		m := tgbotapi.NewMessage(id, text)
+		m.ParseMode = "Markdown"
+		tg.Send(m)
+	}
 }
 
 func mustEnv(key string) string {

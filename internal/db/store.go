@@ -34,7 +34,6 @@ func (s *Store) CreatePendingOrder(ctx context.Context, clientTelegramID int64, 
 	}
 	defer tx.Rollback(ctx)
 
-	// Upsert client
 	var clientID int64
 	err = tx.QueryRow(ctx, `
 		INSERT INTO clients (telegram_id) VALUES ($1)
@@ -45,7 +44,6 @@ func (s *Store) CreatePendingOrder(ctx context.Context, clientTelegramID int64, 
 		return 0, fmt.Errorf("upsert client: %w", err)
 	}
 
-	// Create order
 	var orderID int64
 	err = tx.QueryRow(ctx, `
 		INSERT INTO orders (client_id, package_id, profile_link, total_kes, status)
@@ -56,7 +54,6 @@ func (s *Store) CreatePendingOrder(ctx context.Context, clientTelegramID int64, 
 		return 0, fmt.Errorf("insert order: %w", err)
 	}
 
-	// Create transaction record
 	_, err = tx.Exec(ctx, `
 		INSERT INTO transactions (order_id, amount_kes) VALUES ($1, $2)
 	`, orderID, amountKES)
@@ -65,6 +62,13 @@ func (s *Store) CreatePendingOrder(ctx context.Context, clientTelegramID int64, 
 	}
 
 	return orderID, tx.Commit(ctx)
+}
+
+func (s *Store) SaveSTKRequest(ctx context.Context, orderID int64, phone, stkRequestID string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE transactions SET phone = $1, stk_request_id = $2 WHERE order_id = $3
+	`, phone, stkRequestID, orderID)
+	return err
 }
 
 func (s *Store) ConfirmTransaction(ctx context.Context, orderID, confirmedBy int64) error {
@@ -113,7 +117,6 @@ func (s *Store) SaveRefill(ctx context.Context, orderID, wizOrderID, wizRefillID
 	return err
 }
 
-// GetProcessingOrders returns all orders currently being fulfilled
 func (s *Store) GetProcessingOrders(ctx context.Context) ([]*models.Order, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, client_id, package_id, profile_link, total_kes, status, wiz_order_ids, created_at, updated_at
@@ -136,7 +139,6 @@ func (s *Store) GetProcessingOrders(ctx context.Context) ([]*models.Order, error
 	return orders, rows.Err()
 }
 
-// GetClientTelegramID returns the telegram_id for the client who owns an order
 func (s *Store) GetClientTelegramID(ctx context.Context, orderID int64) (int64, error) {
 	var tgID int64
 	err := s.pool.QueryRow(ctx, `
@@ -147,7 +149,39 @@ func (s *Store) GetClientTelegramID(ctx context.Context, orderID int64) (int64, 
 	return tgID, err
 }
 
-// GetRefillableOrders returns completed Follower Booster orders not yet refilled
+// PendingSTKTransaction holds data needed to poll a payment
+type PendingSTKTransaction struct {
+	OrderID      int64
+	STKRequestID string
+	AmountKES    int
+}
+
+func (s *Store) GetPendingSTKTransactions(ctx context.Context) ([]PendingSTKTransaction, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT t.order_id, t.stk_request_id, t.amount_kes
+		FROM transactions t
+		JOIN orders o ON o.id = t.order_id
+		WHERE t.confirmed = false
+		  AND t.stk_request_id IS NOT NULL
+		  AND o.status = 'pending'
+		  AND t.created_at > NOW() - INTERVAL '30 minutes'
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var txns []PendingSTKTransaction
+	for rows.Next() {
+		var t PendingSTKTransaction
+		if err := rows.Scan(&t.OrderID, &t.STKRequestID, &t.AmountKES); err != nil {
+			return nil, err
+		}
+		txns = append(txns, t)
+	}
+	return txns, rows.Err()
+}
+
 func (s *Store) GetRefillableOrders(ctx context.Context) ([]*models.Order, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT o.id, o.client_id, o.package_id, o.profile_link, o.total_kes,

@@ -7,26 +7,28 @@ CREATE TABLE clients (
 );
 
 CREATE TABLE orders (
-    id           BIGSERIAL PRIMARY KEY,
-    client_id    BIGINT NOT NULL REFERENCES clients(id),
-    package_id   TEXT NOT NULL,
-    profile_link TEXT NOT NULL,
-    total_kes    INT NOT NULL,
-    status       TEXT NOT NULL DEFAULT 'pending',
+    id            BIGSERIAL PRIMARY KEY,
+    client_id     BIGINT NOT NULL REFERENCES clients(id),
+    package_id    TEXT NOT NULL,
+    profile_link  TEXT NOT NULL,
+    total_kes     INT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending',
     wiz_order_ids BIGINT[],
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE transactions (
-    id            BIGSERIAL PRIMARY KEY,
-    order_id      BIGINT NOT NULL REFERENCES orders(id),
-    amount_kes    INT NOT NULL,
-    mpesa_ref     TEXT,
-    confirmed     BOOLEAN NOT NULL DEFAULT FALSE,
-    confirmed_by  BIGINT,
-    confirmed_at  TIMESTAMPTZ,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                     BIGSERIAL PRIMARY KEY,
+    order_id               BIGINT NOT NULL REFERENCES orders(id),
+    amount_kes             INT NOT NULL,
+    phone                  TEXT,
+    mpesa_ref              TEXT,
+    stk_request_id         TEXT,
+    confirmed              BOOLEAN NOT NULL DEFAULT FALSE,
+    confirmed_by           BIGINT,
+    confirmed_at           TIMESTAMPTZ,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE refill_records (
@@ -42,5 +44,7 @@ CREATE TABLE refill_records (
 CREATE INDEX ON orders(client_id);
 CREATE INDEX ON orders(status);
 CREATE INDEX ON transactions(order_id);
+CREATE INDEX ON transactions(confirmed);
+CREATE INDEX ON transactions(stk_request_id);
 CREATE INDEX ON refill_records(order_id);
 CREATE INDEX ON refill_records(status);

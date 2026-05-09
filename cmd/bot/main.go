@@ -12,6 +12,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/aapom/smm/internal/bot"
 	"github.com/aapom/smm/internal/db"
+	"github.com/aapom/smm/internal/megapay"
 	"github.com/aapom/smm/internal/smmwiz"
 )
 
@@ -19,12 +20,6 @@ func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("no .env file, reading from environment")
 	}
-
-	tgToken := mustEnv("TELEGRAM_BOT_TOKEN")
-	wizKey := mustEnv("SMMWIZ_API_KEY")
-	adminStr := mustEnv("ADMIN_TELEGRAM_IDS")
-
-	adminIDs := parseAdminIDs(adminStr)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -35,9 +30,11 @@ func main() {
 	}
 	defer store.Close()
 
-	wiz := smmwiz.New(wizKey)
+	wiz := smmwiz.New(mustEnv("SMMWIZ_API_KEY"))
+	pay := megapay.New(mustEnv("MEGAPAY_API_KEY"), mustEnv("MEGAPAY_EMAIL"))
+	adminIDs := parseAdminIDs(mustEnv("ADMIN_TELEGRAM_IDS"))
 
-	b, err := bot.New(tgToken, wiz, store, adminIDs)
+	b, err := bot.New(mustEnv("TELEGRAM_BOT_TOKEN"), wiz, pay, store, adminIDs)
 	if err != nil {
 		log.Fatalf("bot init: %v", err)
 	}

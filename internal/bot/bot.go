@@ -5,13 +5,14 @@ import (
 	"log"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/aapom/smm/internal/megapay"
 	"github.com/aapom/smm/internal/models"
 	"github.com/aapom/smm/internal/smmwiz"
 )
 
-// Store is the DB interface the bot depends on
 type Store interface {
 	CreatePendingOrder(ctx context.Context, clientTelegramID int64, packageID, link string, amountKES int) (int64, error)
+	SaveSTKRequest(ctx context.Context, orderID int64, phone, stkRequestID string) error
 	ConfirmTransaction(ctx context.Context, orderID, confirmedBy int64) error
 	CancelOrder(ctx context.Context, orderID int64) error
 	GetOrder(ctx context.Context, orderID int64) (*models.Order, error)
@@ -19,22 +20,22 @@ type Store interface {
 	SaveRefill(ctx context.Context, orderID, wizOrderID, wizRefillID int64) error
 }
 
-// Package alias so handler.go can reference it without import cycle
 type Package = models.Package
 
 type Bot struct {
 	api      *tgbotapi.BotAPI
 	wiz      *smmwiz.Client
+	pay      *megapay.Client
 	store    Store
 	adminIDs []int64
 }
 
-func New(token string, wiz *smmwiz.Client, store Store, adminIDs []int64) (*Bot, error) {
+func New(token string, wiz *smmwiz.Client, pay *megapay.Client, store Store, adminIDs []int64) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, err
 	}
-	return &Bot{api: api, wiz: wiz, store: store, adminIDs: adminIDs}, nil
+	return &Bot{api: api, wiz: wiz, pay: pay, store: store, adminIDs: adminIDs}, nil
 }
 
 func (b *Bot) Run(ctx context.Context) {
@@ -55,7 +56,6 @@ func (b *Bot) Run(ctx context.Context) {
 	}
 }
 
-// fulfillOrder places all SMMWiz sub-orders for an approved order
 func (b *Bot) fulfillOrder(ctx context.Context, orderID int64) {
 	order, err := b.store.GetOrder(ctx, orderID)
 	if err != nil {
@@ -76,7 +76,6 @@ func (b *Bot) fulfillOrder(ctx context.Context, orderID int64) {
 			Link:     order.ProfileLink,
 			Quantity: comp.Quantity,
 		}
-		// Apply drip-feed when runs/interval are set on the component
 		if comp.Runs > 0 {
 			req.Runs = comp.Runs
 			req.Interval = comp.Interval
@@ -84,7 +83,7 @@ func (b *Bot) fulfillOrder(ctx context.Context, orderID int64) {
 
 		resp, err := b.wiz.AddOrder(req)
 		if err != nil {
-			log.Printf("fulfillOrder AddOrder (order %d, service %d): %v", orderID, comp.ServiceID, err)
+			log.Printf("fulfillOrder AddOrder (order %d service %d): %v", orderID, comp.ServiceID, err)
 			b.store.UpdateOrderStatus(ctx, orderID, models.StatusFailed, wizIDs)
 			return
 		}

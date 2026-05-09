@@ -4,17 +4,21 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 type sessionState struct {
-	Step      string
-	PackageID string
+	Step        string
+	PackageID   string
+	ProfileLink string
 }
 
 var sessions = map[int64]*sessionState{}
+
+var phoneRegex = regexp.MustCompile(`^(?:254|\+254|0)(7\d{8}|1\d{8})$`)
 
 func mainKeyboard() tgbotapi.ReplyKeyboardMarkup {
 	kb := tgbotapi.NewReplyKeyboard(
@@ -70,6 +74,9 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) {
 	case sess.Step == "awaiting_link":
 		b.handleLinkSubmission(ctx, chatID, msg.From.ID, msg.Text, sess)
 
+	case sess.Step == "awaiting_phone":
+		b.handlePhoneSubmission(ctx, chatID, msg.From.ID, msg.Text, sess)
+
 	default:
 		b.sendPackageMenu(chatID)
 	}
@@ -117,6 +124,18 @@ func (b *Bot) handleLinkSubmission(ctx context.Context, chatID, userID int64, li
 		b.sendText(chatID, "⚠️ That doesn't look like a valid link.\n\nPlease paste the full URL, e.g:\nhttps://instagram.com/yourprofile")
 		return
 	}
+	sess.ProfileLink = link
+	sess.Step = "awaiting_phone"
+	b.sendText(chatID, "📲 Enter your M-Pesa phone number to pay:\n\nFormat: *07XXXXXXXX* or *254XXXXXXXXX*")
+}
+
+func (b *Bot) handlePhoneSubmission(ctx context.Context, chatID, userID int64, phone string, sess *sessionState) {
+	phone = strings.TrimSpace(phone)
+	normalized := normalizePhone(phone)
+	if normalized == "" {
+		b.sendText(chatID, "⚠️ Invalid phone number. Please enter a valid Safaricom number, e.g:\n*0712345678*")
+		return
+	}
 
 	pkg, ok := GetPackage(sess.PackageID)
 	if !ok {
@@ -125,20 +144,39 @@ func (b *Bot) handleLinkSubmission(ctx context.Context, chatID, userID int64, li
 		return
 	}
 
-	orderID, err := b.store.CreatePendingOrder(ctx, userID, pkg.ID, link, pkg.PriceKES)
+	// Create order in DB
+	orderID, err := b.store.CreatePendingOrder(ctx, userID, pkg.ID, sess.ProfileLink, pkg.PriceKES)
 	if err != nil {
 		log.Printf("createPendingOrder: %v", err)
 		b.sendText(chatID, "⚠️ Could not create your order. Please try again.")
 		return
 	}
 
-	b.sendTextWithKeyboard(chatID, fmt.Sprintf(
-		"✅ *Order Received!*\n\n%s *%s*\n🔗 %s\n💰 *KES %d*\n\n📲 Send payment via M-Pesa to:\n*Till No: XXXXXX*\n\nShare the M-Pesa confirmation code with us once paid. Your order will be activated within minutes.",
-		platformEmoji(string(pkg.Platform)), pkg.Name, link, pkg.PriceKES,
-	), mainKeyboard())
+	// Trigger STK push
+	b.sendText(chatID, fmt.Sprintf(
+		"💳 Sending M-Pesa request to *%s*...\n\nCheck your phone and enter your PIN to complete payment.",
+		phone,
+	))
 
-	b.notifyAdmins(ctx, orderID, userID, pkg, link)
+	go b.initiatePayment(context.Background(), chatID, orderID, pkg.PriceKES, normalized, phone)
 	sess.Step = ""
+}
+
+func (b *Bot) initiatePayment(ctx context.Context, chatID, orderID int64, amountKES int, phone, displayPhone string) {
+	reference := fmt.Sprintf("Order #%d", orderID)
+	resp, err := b.pay.InitiateSTK(amountKES, phone, reference)
+	if err != nil {
+		log.Printf("initiateSTK order %d: %v", orderID, err)
+		b.sendText(chatID, "⚠️ Could not send M-Pesa request. Please try again or contact support.")
+		return
+	}
+
+	// Save STK request ID so worker can poll it
+	if err := b.store.SaveSTKRequest(ctx, orderID, phone, resp.TransactionRequestID); err != nil {
+		log.Printf("saveSTKRequest order %d: %v", orderID, err)
+	}
+
+	log.Printf("STK push sent: order %d phone %s txn %s", orderID, displayPhone, resp.TransactionRequestID)
 }
 
 func (b *Bot) sendWelcome(chatID int64) {
@@ -177,20 +215,13 @@ func (b *Bot) sendBalance(ctx context.Context, chatID int64) {
 
 func (b *Bot) notifyAdmins(ctx context.Context, orderID, clientTelegramID int64, pkg Package, link string) {
 	text := fmt.Sprintf(
-		"🔔 *New Order #%d*\n\n👤 Client: %d\n📦 %s %s\n💰 KES %d\n🔗 %s\n\n✅ Tap *Approve* once M-Pesa payment is confirmed.",
+		"🔔 *New Order #%d*\n\n👤 Client: %d\n📦 %s %s\n💰 KES %d\n🔗 %s",
 		orderID, clientTelegramID, platformEmoji(string(pkg.Platform)), pkg.Name, pkg.PriceKES, link,
 	)
-	approveBtn := tgbotapi.NewInlineKeyboardButtonData("✅ Approve", fmt.Sprintf("approve:%d", orderID))
-	rejectBtn := tgbotapi.NewInlineKeyboardButtonData("❌ Reject", fmt.Sprintf("reject:%d", orderID))
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(approveBtn, rejectBtn))
-
 	for _, adminID := range b.adminIDs {
 		msg := tgbotapi.NewMessage(adminID, text)
-		msg.ReplyMarkup = keyboard
 		msg.ParseMode = "Markdown"
-		if _, err := b.api.Send(msg); err != nil {
-			log.Printf("notifyAdmins send to %d: %v", adminID, err)
-		}
+		b.api.Send(msg)
 	}
 }
 
@@ -258,6 +289,21 @@ func (b *Bot) isAdmin(userID int64) bool {
 
 func isValidLink(link string) bool {
 	return strings.HasPrefix(link, "https://") || strings.HasPrefix(link, "http://")
+}
+
+// normalizePhone converts Kenyan numbers to 254XXXXXXXXX format
+func normalizePhone(phone string) string {
+	phone = strings.ReplaceAll(phone, " ", "")
+	if !phoneRegex.MatchString(phone) {
+		return ""
+	}
+	if strings.HasPrefix(phone, "0") {
+		return "254" + phone[1:]
+	}
+	if strings.HasPrefix(phone, "+") {
+		return phone[1:]
+	}
+	return phone
 }
 
 func platformEmoji(platform string) string {
