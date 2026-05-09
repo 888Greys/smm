@@ -20,7 +20,6 @@ func main() {
 
 	wiz := smmwiz.New(key)
 
-	// 1. Check balance
 	fmt.Println("=== BALANCE ===")
 	bal, err := wiz.GetBalance()
 	if err != nil {
@@ -28,18 +27,22 @@ func main() {
 	}
 	fmt.Printf("Available: %s %s\n\n", bal.Balance, bal.Currency)
 
-	// 2. List TikTok services
-	fmt.Println("=== TIKTOK SERVICES ===")
+	fmt.Println("=== SERVICES ===")
 	services, err := wiz.GetServices()
 	if err != nil {
 		log.Fatalf("services fetch failed: %v", err)
 	}
 
-	for _, s := range services {
-		if strings.Contains(strings.ToLower(s.Name), "tiktok") ||
-			strings.Contains(strings.ToLower(s.Category), "tiktok") {
-			fmt.Printf("ID: %-6d | %-50s | Rate: %s | Min: %s Max: %s | Refill: %v\n",
-				s.Service, s.Name, s.Rate, s.Min, s.Max, s.Refill)
+	keywords := []string{"tiktok", "instagram follower", "youtube sub", "youtube view"}
+	for _, kw := range keywords {
+		fmt.Printf("\n--- %s ---\n", strings.ToUpper(kw))
+		for _, s := range services {
+			name := strings.ToLower(s.Name)
+			cat := strings.ToLower(s.Category)
+			if strings.Contains(name, kw) || strings.Contains(cat, kw) {
+				fmt.Printf("ID:%-6d Rate:$%-8s Min:%-8d Max:%-10d %s\n",
+					s.Service, s.Rate, s.Min, s.Max, s.Name)
+			}
 		}
 	}
 }

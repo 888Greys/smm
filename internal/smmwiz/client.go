@@ -69,8 +69,8 @@ type Service struct {
 	Name     string `json:"name"`
 	Type     string `json:"type"`
 	Rate     string `json:"rate"`
-	Min      string `json:"min"`
-	Max      string `json:"max"`
+	Min      int    `json:"min"`
+	Max      int    `json:"max"`
 	Category string `json:"category"`
 	Refill   bool   `json:"refill"`
 	Cancel   bool   `json:"cancel"`
