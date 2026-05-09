@@ -265,7 +265,7 @@ func postSocialProof(tg *tgbotapi.BotAPI, channelID int64, pkg models.Package) {
 		emoji = "▶️"
 	}
 	text := fmt.Sprintf(
-		"✅ *Another order delivered!*\n\n%s *%s*\n📦 %s\n\n⚡️ Delivered fast. No drops.\n\n🛍 Get yours → @AaPomSMM",
+		"✅ *Another order delivered!*\n\n%s *%s*\n📦 %s\n\n⚡️ Delivered fast. No drops.\n\n🛍 Get yours → @pompomputrin888pom_bot",
 		emoji, pkg.Name, pkg.Description,
 	)
 	send(tg, channelID, text)

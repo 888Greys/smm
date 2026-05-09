@@ -72,7 +72,7 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) {
 		b.sendReferralInfo(ctx, chatID, msg.From.ID)
 
 	case msg.Text == "💬 Support":
-		b.sendText(chatID, "💬 *Support*\n\nContact us: @AaPomSupport\n\nResponse time: within 1 hour.")
+		b.sendText(chatID, "💬 *Support*\n\nContact us: @workratew\n\nResponse time: within 1 hour.")
 
 	case msg.Text == "📋 Rules":
 		b.sendText(chatID, "📋 *Rules*\n\n✅ Orders are non-refundable once placed\n✅ Delivery starts within 0-1 hours\n✅ Packages with Refill include 30-day guarantee\n✅ Use real public profile links\n\n⚠️ Private accounts will not be fulfilled")

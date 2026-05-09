@@ -291,7 +291,7 @@ export default function OrderModal({ pkg, onClose }: Props) {
                 Try Again
               </button>
               <a
-                href="https://t.me/AaPomSupport"
+                href="https://t.me/workratew"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-full py-3 text-sm text-slate-400 hover:text-violet-300 transition-colors"

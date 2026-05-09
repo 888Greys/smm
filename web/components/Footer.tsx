@@ -28,12 +28,12 @@ export default function Footer() {
               <li><a href="#packages" className="hover:text-violet-300 transition-colors">Packages</a></li>
               <li><a href="#how-it-works" className="hover:text-violet-300 transition-colors">How It Works</a></li>
               <li>
-                <a href="https://t.me/AaPomSMM" target="_blank" rel="noopener noreferrer" className="hover:text-violet-300 transition-colors">
+                <a href="https://t.me/pompomputrin888pom_bot" target="_blank" rel="noopener noreferrer" className="hover:text-violet-300 transition-colors">
                   Telegram Bot
                 </a>
               </li>
               <li>
-                <a href="https://t.me/AaPomSupport" target="_blank" rel="noopener noreferrer" className="hover:text-violet-300 transition-colors">
+                <a href="https://t.me/workratew" target="_blank" rel="noopener noreferrer" className="hover:text-violet-300 transition-colors">
                   Support
                 </a>
               </li>
@@ -44,7 +44,7 @@ export default function Footer() {
           <div>
             <h4 className="text-sm font-semibold text-white mb-4">Support</h4>
             <ul className="space-y-2 text-sm text-slate-500">
-              <li>Telegram: <a href="https://t.me/AaPomSupport" className="text-violet-400 hover:text-violet-300">@AaPomSupport</a></li>
+              <li>Telegram: <a href="https://t.me/workratew" className="text-violet-400 hover:text-violet-300">@workratew</a></li>
               <li>Response time: Within 1 hour</li>
               <li className="text-xs text-slate-600 mt-3">
                 Orders are non-refundable once placed. Ensure your profile is public before ordering.

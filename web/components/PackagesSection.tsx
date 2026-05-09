@@ -141,7 +141,7 @@ export default function PackagesSection({ initialPackages }: { initialPackages: 
           <p className="text-slate-500 text-sm">
             Prefer ordering via Telegram?{' '}
             <a
-              href="https://t.me/AaPomSMM"
+              href="https://t.me/pompomputrin888pom_bot"
               target="_blank"
               rel="noopener noreferrer"
               className="text-violet-400 hover:text-violet-300 font-medium"

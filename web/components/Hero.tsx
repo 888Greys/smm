@@ -69,7 +69,7 @@ export default function Hero() {
             <ArrowRight size={20} />
           </a>
           <a
-            href="https://t.me/AaPomSMM"
+            href="https://t.me/pompomputrin888pom_bot"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-8 py-4 rounded-xl font-semibold text-slate-300 border border-border-dim hover:border-slate-500 hover:text-white transition-all text-lg"
