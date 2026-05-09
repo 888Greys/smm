@@ -16,6 +16,7 @@ type sessionState struct {
 	PackageID    string
 	ProfileLink  string
 	ReferralCode string
+	ScanMsgID    int
 }
 
 var sessions = map[int64]*sessionState{}
@@ -98,6 +99,9 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) {
 	case sess.Step == "awaiting_link":
 		b.handleLinkSubmission(ctx, chatID, msg.From.ID, msg.Text, sess)
 
+	case sess.Step == "awaiting_profile_confirm":
+		b.sendText(chatID, "⬆️ Please tap *Yes, Start Boost* or *Wrong Account* in the message above.")
+
 	case sess.Step == "awaiting_confirm":
 		b.sendText(chatID, "⬆️ Please tap the *Confirm & Pay* button above to proceed.")
 
@@ -144,6 +148,32 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 			refillLine(pkg),
 			platformName(string(pkg.Platform)),
 		))
+
+	case cb.Data == "profile_confirm":
+		if sess.PackageID == "" || sess.ProfileLink == "" {
+			b.api.Send(tgbotapi.NewCallback(cb.ID, "Session expired — tap Shop to restart."))
+			return
+		}
+		sess.Step = "awaiting_confirm"
+		pkg, _ := GetPackage(sess.PackageID)
+		// Remove the inline buttons from the scan card
+		edit := tgbotapi.NewEditMessageReplyMarkup(chatID, cb.Message.MessageID, tgbotapi.InlineKeyboardMarkup{})
+		b.api.Send(edit)
+		b.sendSafetyBriefing(chatID, pkg, sess.ProfileLink)
+
+	case cb.Data == "profile_retry":
+		if sess.PackageID == "" {
+			b.sendText(chatID, "Session expired. Tap 🛍 Shop to restart.")
+			return
+		}
+		sess.Step = "awaiting_link"
+		sess.ProfileLink = ""
+		sess.ScanMsgID = 0
+		pkg, _ := GetPackage(sess.PackageID)
+		edit := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID,
+			"✏️ No problem! Enter the correct *"+platformName(string(pkg.Platform))+"* username:")
+		edit.ParseMode = "Markdown"
+		b.api.Send(edit)
 
 	case cb.Data == "confirm_order":
 		if sess.Step != "awaiting_confirm" || sess.PackageID == "" {
@@ -275,13 +305,15 @@ func (b *Bot) handleLinkSubmission(ctx context.Context, chatID, userID int64, in
 		return
 	}
 
-	var profileLink string
+	// Derive username — accept raw handle or full URL
+	var username, profileLink string
 	if isValidLink(input) {
-		// User pasted a full URL — accept it directly
 		profileLink = input
+		// Best-effort: extract the last non-empty path segment as username
+		parts := strings.Split(strings.TrimRight(input, "/"), "/")
+		username = strings.TrimPrefix(parts[len(parts)-1], "@")
 	} else {
-		// Treat as a username — construct the URL
-		username := strings.TrimPrefix(input, "@")
+		username = strings.TrimPrefix(input, "@")
 		if len(username) < 2 || strings.ContainsAny(username, " /\\?#") {
 			b.sendText(chatID, "⚠️ That doesn't look right.\n\nPlease enter just your username, e.g:\n`yourhandle`")
 			return
@@ -290,8 +322,134 @@ func (b *Bot) handleLinkSubmission(ctx context.Context, chatID, userID int64, in
 	}
 
 	sess.ProfileLink = profileLink
-	sess.Step = "awaiting_confirm"
-	b.sendSafetyBriefing(chatID, pkg, profileLink)
+
+	// Send the "Scanning…" placeholder immediately
+	scanMsg := tgbotapi.NewMessage(chatID, fmt.Sprintf(
+		"🔍 *Scanning %s for* `@%s`*...*\n\n_Please wait — fetching your profile_",
+		platformName(string(pkg.Platform)), username,
+	))
+	scanMsg.ParseMode = "Markdown"
+	sent, err := b.api.Send(scanMsg)
+	if err != nil {
+		log.Printf("scanMsg send: %v", err)
+		// Fallback: skip profile check and go straight to briefing
+		sess.Step = "awaiting_confirm"
+		b.sendSafetyBriefing(chatID, pkg, profileLink)
+		return
+	}
+
+	sess.ScanMsgID = sent.MessageID
+	sess.Step = "awaiting_profile_confirm"
+
+	go b.runProfileScan(context.Background(), chatID, sent.MessageID, string(pkg.Platform), username, profileLink, sess.PackageID)
+}
+
+func (b *Bot) runProfileScan(_ context.Context, chatID int64, scanMsgID int, platform, username, profileLink, _ string) {
+	info, err := profile.Lookup(platform, username)
+
+	sess := b.getSession(chatID)
+
+	if err != nil || info == nil {
+		b.editScanMessage(chatID, scanMsgID, fmt.Sprintf(
+			"⚠️ *Could not reach %s right now.*\n\n"+
+				"Your profile link has been saved. Is this correct?\n`%s`",
+			platformName(platform), profileLink,
+		), true)
+		if sess.Step == "awaiting_profile_confirm" {
+			sess.ProfileLink = profileLink
+		}
+		return
+	}
+
+	if info.IsPrivate {
+		// Block the order — private accounts can't receive followers
+		sess.Step = "awaiting_link"
+		sess.ProfileLink = ""
+		sess.ScanMsgID = 0
+
+		name := info.Name
+		if name == "" {
+			name = "@" + username
+		}
+		edit := tgbotapi.NewEditMessageText(chatID, scanMsgID,
+			fmt.Sprintf("🔒 *Private Account Detected*\n\n"+
+				"*%s* (@%s) has a private profile.\n\n"+
+				"VectorBoost requires a *public* account to deliver followers.\n\n"+
+				"1️⃣ Go to your %s settings\n"+
+				"2️⃣ Switch to *Public* account\n"+
+				"3️⃣ Come back and enter your username again",
+				name, username, platformName(platform),
+			))
+		edit.ParseMode = "Markdown"
+		edit.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
+			InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
+				{tgbotapi.NewInlineKeyboardButtonData("🔄 I've Made It Public — Try Again", "profile_retry")},
+			},
+		}
+		b.api.Send(edit)
+		return
+	}
+
+	if !info.Found {
+		// Not found / blocked — let user decide
+		b.editScanMessage(chatID, scanMsgID, fmt.Sprintf(
+			"⚠️ *Profile Not Found on %s*\n\n"+
+				"We couldn't verify `@%s`.\n\n"+
+				"This sometimes happens when the platform blocks lookups. "+
+				"If your account is public, you can still proceed — or tap below to re-enter your username.",
+			platformName(platform), username,
+		), true)
+		return
+	}
+
+	// Build the profile card text
+	var lines []string
+	lines = append(lines, fmt.Sprintf("✅ *Account Found on %s!*\n", platformName(platform)))
+	if info.Name != "" {
+		lines = append(lines, fmt.Sprintf("👤 *%s*", info.Name))
+	}
+	lines = append(lines, fmt.Sprintf("🔗 @%s", username))
+	if info.Followers != "" {
+		lines = append(lines, fmt.Sprintf("👥 %s", info.Followers))
+	}
+	if info.Bio != "" {
+		lines = append(lines, fmt.Sprintf("💬 _%s_", info.Bio))
+	}
+	lines = append(lines, "\n*Is this your account?* Tap below to confirm and proceed.")
+
+	b.editScanMessage(chatID, scanMsgID, strings.Join(lines, "\n"), false)
+}
+
+func (b *Bot) editScanMessage(chatID int64, msgID int, text string, showRetry bool) {
+	edit := tgbotapi.NewEditMessageText(chatID, msgID, text)
+	edit.ParseMode = "Markdown"
+
+	var rows [][]tgbotapi.InlineKeyboardButton
+	if showRetry {
+		rows = append(rows,
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("✅ Yes, Start Boost", "profile_confirm"),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("✏️ Wrong Account — Re-enter", "profile_retry"),
+			),
+		)
+	} else {
+		rows = append(rows,
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("✅ Yes, Start Boost", "profile_confirm"),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("✏️ Wrong Account", "profile_retry"),
+			),
+		)
+	}
+
+	kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
+	edit.ReplyMarkup = &kb
+	if _, err := b.api.Send(edit); err != nil {
+		log.Printf("editScanMessage %d: %v", chatID, err)
+	}
 }
 
 func (b *Bot) sendSafetyBriefing(chatID int64, pkg Package, link string) {
