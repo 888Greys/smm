@@ -227,7 +227,7 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 // ── Navigation ───────────────────────────────────────────────────────────────
 
 func (b *Bot) sendCategoryMenu(chatID int64) {
-	msg := tgbotapi.NewMessage(chatID, "🛍 *SMM Mall*\n\nChoose a platform to see available packages:")
+	msg := tgbotapi.NewMessage(chatID, "🚀 *VectorBoost*\n\nChoose a platform to get started:")
 	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = categoryKeyboard()
 	if _, err := b.api.Send(msg); err != nil {
@@ -236,7 +236,7 @@ func (b *Bot) sendCategoryMenu(chatID int64) {
 }
 
 func (b *Bot) editToCategoryMenu(chatID int64, msgID int) {
-	edit := tgbotapi.NewEditMessageText(chatID, msgID, "🛍 *SMM Mall*\n\nChoose a platform to see available packages:")
+	edit := tgbotapi.NewEditMessageText(chatID, msgID, "🚀 *VectorBoost*\n\nChoose a platform to get started:")
 	edit.ParseMode = "Markdown"
 	kb := categoryKeyboard()
 	edit.ReplyMarkup = &kb
