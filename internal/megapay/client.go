@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 )
@@ -89,7 +90,7 @@ func (c *Client) CheckStatus(transactionRequestID string) (*StatusResponse, erro
 	}
 
 	var resp StatusResponse
-	if err := c.post(statusURL, req, &resp); err != nil {
+	if err := c.postDebug(statusURL, req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -111,6 +112,32 @@ func (c *Client) post(url string, body any, dest any) error {
 	if err != nil {
 		return fmt.Errorf("megapay read: %w", err)
 	}
+
+	if err := json.Unmarshal(raw, dest); err != nil {
+		return fmt.Errorf("megapay parse: %w (body: %s)", err, string(raw))
+	}
+	return nil
+}
+
+// postDebug is like post but logs the raw response body for debugging
+func (c *Client) postDebug(url string, body any, dest any) error {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(b))
+	if err != nil {
+		return fmt.Errorf("megapay http: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("megapay read: %w", err)
+	}
+
+	log.Printf("megapay raw response: %s", string(raw))
 
 	if err := json.Unmarshal(raw, dest); err != nil {
 		return fmt.Errorf("megapay parse: %w (body: %s)", err, string(raw))
