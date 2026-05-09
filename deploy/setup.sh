@@ -24,6 +24,7 @@ fi
 # 4. Build binaries
 mkdir -p /opt/smm/bin
 cd /opt/smm/repo
+go mod tidy
 go build -o /opt/smm/bin/bot    ./cmd/bot
 go build -o /opt/smm/bin/worker ./cmd/worker
 go build -o /opt/smm/bin/server ./cmd/server
