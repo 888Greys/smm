@@ -1,9 +1,12 @@
 CREATE TABLE clients (
-    id          BIGSERIAL PRIMARY KEY,
-    telegram_id BIGINT UNIQUE NOT NULL,
-    username    TEXT,
-    phone       TEXT,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                  BIGSERIAL PRIMARY KEY,
+    telegram_id         BIGINT UNIQUE NOT NULL,
+    username            TEXT,
+    phone               TEXT,
+    referral_code       TEXT UNIQUE,
+    credit_balance_kes  INT NOT NULL DEFAULT 0,
+    referred_by         BIGINT REFERENCES clients(id),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE orders (
@@ -48,3 +51,14 @@ CREATE INDEX ON transactions(confirmed);
 CREATE INDEX ON transactions(stk_request_id);
 CREATE INDEX ON refill_records(order_id);
 CREATE INDEX ON refill_records(status);
+
+CREATE TABLE referrals (
+    id          BIGSERIAL PRIMARY KEY,
+    referrer_id BIGINT NOT NULL REFERENCES clients(id),
+    referred_id BIGINT NOT NULL UNIQUE REFERENCES clients(id),
+    order_id    BIGINT REFERENCES orders(id),
+    credit_kes  INT NOT NULL DEFAULT 50,
+    paid        BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX ON referrals(referrer_id);

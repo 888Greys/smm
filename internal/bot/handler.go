@@ -11,9 +11,10 @@ import (
 )
 
 type sessionState struct {
-	Step        string
-	PackageID   string
-	ProfileLink string
+	Step         string
+	PackageID    string
+	ProfileLink  string
+	ReferralCode string
 }
 
 var sessions = map[int64]*sessionState{}
@@ -27,8 +28,8 @@ func mainKeyboard() tgbotapi.ReplyKeyboardMarkup {
 			tgbotapi.NewKeyboardButton("📦 My Orders"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("🤝 Refer & Earn"),
 			tgbotapi.NewKeyboardButton("💬 Support"),
-			tgbotapi.NewKeyboardButton("📋 Rules"),
 		),
 	)
 	kb.ResizeKeyboard = true
@@ -51,7 +52,12 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) {
 	log.Printf("msg from %d: %q", chatID, msg.Text)
 
 	switch {
-	case msg.Text == "/start":
+	case strings.HasPrefix(msg.Text, "/start"):
+		b.store.UpsertClient(ctx, msg.From.ID)
+		// Parse referral deep-link: /start ref_XXXXXXXX
+		if parts := strings.Fields(msg.Text); len(parts) == 2 && strings.HasPrefix(parts[1], "ref_") {
+			sess.ReferralCode = strings.TrimPrefix(parts[1], "ref_")
+		}
 		b.sendWelcome(chatID)
 		sess.Step = ""
 
@@ -62,14 +68,20 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) {
 	case msg.Text == "📦 My Orders":
 		b.sendText(chatID, "📦 *My Orders*\n\nNo active orders yet.\n\nTap 🛍 *Shop* to place your first order.")
 
+	case msg.Text == "🤝 Refer & Earn" || msg.Text == "/myreferral":
+		b.sendReferralInfo(ctx, chatID, msg.From.ID)
+
 	case msg.Text == "💬 Support":
 		b.sendText(chatID, "💬 *Support*\n\nContact us: @AaPomSupport\n\nResponse time: within 1 hour.")
 
 	case msg.Text == "📋 Rules":
-		b.sendText(chatID, "📋 *Rules*\n\n✅ Orders are non-refundable once placed\n✅ Delivery starts within 0-1 hours\n✅ Follower Booster includes 30-day refill\n✅ Use real public profile links\n\n⚠️ Private accounts will not be fulfilled")
+		b.sendText(chatID, "📋 *Rules*\n\n✅ Orders are non-refundable once placed\n✅ Delivery starts within 0-1 hours\n✅ Packages with Refill include 30-day guarantee\n✅ Use real public profile links\n\n⚠️ Private accounts will not be fulfilled")
 
 	case msg.Text == "/balance" && b.isAdmin(msg.From.ID):
 		b.sendBalance(ctx, chatID)
+
+	case msg.Text == "/stats" && b.isAdmin(msg.From.ID):
+		b.sendStats(ctx, chatID)
 
 	case sess.Step == "awaiting_link":
 		b.handleLinkSubmission(ctx, chatID, msg.From.ID, msg.Text, sess)
@@ -144,15 +156,13 @@ func (b *Bot) handlePhoneSubmission(ctx context.Context, chatID, userID int64, p
 		return
 	}
 
-	// Create order in DB
-	orderID, err := b.store.CreatePendingOrder(ctx, userID, pkg.ID, sess.ProfileLink, pkg.PriceKES)
+	orderID, err := b.store.CreatePendingOrder(ctx, userID, pkg.ID, sess.ProfileLink, pkg.PriceKES, sess.ReferralCode)
 	if err != nil {
 		log.Printf("createPendingOrder: %v", err)
 		b.sendText(chatID, "⚠️ Could not create your order. Please try again.")
 		return
 	}
 
-	// Trigger STK push
 	b.sendText(chatID, fmt.Sprintf(
 		"💳 Sending M-Pesa request to *%s*...\n\nCheck your phone and enter your PIN to complete payment.",
 		phone,
@@ -171,7 +181,6 @@ func (b *Bot) initiatePayment(ctx context.Context, chatID, orderID int64, amount
 		return
 	}
 
-	// Save STK request ID so worker can poll it
 	if err := b.store.SaveSTKRequest(ctx, orderID, phone, resp.TransactionRequestID); err != nil {
 		log.Printf("saveSTKRequest order %d: %v", orderID, err)
 	}
@@ -189,6 +198,9 @@ func (b *Bot) sendWelcome(chatID int64) {
 func (b *Bot) sendPackageMenu(chatID int64) {
 	rows := [][]tgbotapi.InlineKeyboardButton{}
 	for _, pkg := range Catalog {
+		if pkg.ID == "test_ksh1" {
+			continue // hide test package from public menu
+		}
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(
 				fmt.Sprintf("%s %s — KES %d", platformEmoji(string(pkg.Platform)), pkg.Name, pkg.PriceKES),
@@ -211,6 +223,76 @@ func (b *Bot) sendBalance(ctx context.Context, chatID int64) {
 		return
 	}
 	b.sendText(chatID, fmt.Sprintf("💰 *SMMWiz Balance*\n\n%s %s", bal.Balance, bal.Currency))
+}
+
+func (b *Bot) sendStats(ctx context.Context, chatID int64) {
+	st, err := b.store.GetStats(ctx)
+	if err != nil {
+		b.sendText(chatID, fmt.Sprintf("⚠️ Stats error: %v", err))
+		return
+	}
+
+	var totalRevenue, totalProfit, totalOrders int
+	lines := ""
+	for _, line := range st.Lines {
+		pkg, ok := GetPackage(line.PackageID)
+		profitLine := 0
+		name := line.PackageID
+		if ok {
+			profitLine = pkg.MarginKES * line.OrderCount
+			name = pkg.Name
+		}
+		totalRevenue += line.RevenueKES
+		totalProfit += profitLine
+		totalOrders += line.OrderCount
+		lines += fmt.Sprintf("  • %s × %d → KES %d\n", name, line.OrderCount, line.RevenueKES)
+	}
+	if lines == "" {
+		lines = "  No paid orders yet today.\n"
+	}
+
+	bal, _ := b.wiz.GetBalance()
+	wizBal := "unknown"
+	if bal != nil {
+		wizBal = bal.Balance + " " + bal.Currency
+	}
+
+	text := fmt.Sprintf(
+		"📊 *Admin Dashboard — Last 24h*\n\n"+
+			"💰 Revenue: *KES %d* (%d orders)\n"+
+			"📈 Est. Profit: *KES %d*\n\n"+
+			"%s\n"+
+			"📋 *All-time:* %d total | %d pending | %d processing | %d completed\n\n"+
+			"🏦 SMMWiz: *%s*",
+		totalRevenue, totalOrders, totalProfit,
+		lines,
+		st.TotalOrders, st.PendingOrders, st.ProcessingOrders, st.CompletedOrders,
+		wizBal,
+	)
+	b.sendText(chatID, text)
+}
+
+func (b *Bot) sendReferralInfo(ctx context.Context, chatID, telegramID int64) {
+	b.store.UpsertClient(ctx, telegramID)
+
+	code, err := b.store.GetOrCreateReferralCode(ctx, telegramID)
+	if err != nil {
+		log.Printf("getReferralCode %d: %v", telegramID, err)
+		b.sendText(chatID, "⚠️ Could not load referral info. Try again.")
+		return
+	}
+
+	balance, _ := b.store.GetCreditBalance(ctx, telegramID)
+	link := fmt.Sprintf("https://t.me/%s?start=ref_%s", b.api.Self.UserName, code)
+
+	b.sendText(chatID, fmt.Sprintf(
+		"🤝 *Refer & Earn*\n\n"+
+			"Share your link and earn *KES 50* every time a friend places their first order!\n\n"+
+			"🔗 Your link:\n`%s`\n\n"+
+			"💳 Your credit balance: *KES %d*\n\n"+
+			"_Credits can be used toward your next order — contact support to redeem._",
+		link, balance,
+	))
 }
 
 func (b *Bot) notifyAdmins(ctx context.Context, orderID, clientTelegramID int64, pkg Package, link string) {

@@ -27,8 +27,25 @@ type Package struct {
 	Name        string
 	Platform    Platform
 	PriceKES    int
+	MarginKES   int  // retail price minus wholesale cost (at ~130 KES/USD)
+	Refillable  bool // whether this package gets a 30-day refill
 	Description string
 	Components  []PackageComponent
+}
+
+// DailyStats is returned by Store.GetStats for the admin dashboard
+type DailyStats struct {
+	Lines            []PackageStatLine
+	PendingOrders    int
+	ProcessingOrders int
+	CompletedOrders  int
+	TotalOrders      int
+}
+
+type PackageStatLine struct {
+	PackageID  string
+	OrderCount int
+	RevenueKES int
 }
 
 // PackageComponent maps to a single SMMWiz service call within a package

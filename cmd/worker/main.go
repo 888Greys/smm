@@ -46,18 +46,19 @@ func main() {
 	}
 	adminIDs := parseAdminIDs(mustEnv("ADMIN_TELEGRAM_IDS"))
 
-	// Poll payments every 10 seconds
+	var proofChannelID int64
+	if ch := os.Getenv("SOCIAL_PROOF_CHANNEL_ID"); ch != "" {
+		proofChannelID, _ = strconv.ParseInt(ch, 10, 64)
+	}
+
 	paymentTicker := time.NewTicker(10 * time.Second)
-	// Poll SMMWiz order status every 30 minutes
 	orderTicker := time.NewTicker(30 * time.Minute)
-	// Trigger refills daily
 	refillTicker := time.NewTicker(24 * time.Hour)
-	// Check balance every 12 hours
 	balanceTicker := time.NewTicker(12 * time.Hour)
 
 	log.Println("worker started")
 	checkBalance(ctx, wiz, tgAPI, adminIDs, balanceThreshold)
-	pollOrders(ctx, store, wiz, tgAPI)
+	pollOrders(ctx, store, wiz, tgAPI, proofChannelID)
 
 	for {
 		select {
@@ -65,9 +66,9 @@ func main() {
 			log.Println("worker stopped")
 			return
 		case <-paymentTicker.C:
-			pollPayments(ctx, store, pay, wiz, tgAPI, adminIDs)
+			pollPayments(ctx, store, pay, wiz, tgAPI, adminIDs, proofChannelID)
 		case <-orderTicker.C:
-			pollOrders(ctx, store, wiz, tgAPI)
+			pollOrders(ctx, store, wiz, tgAPI, proofChannelID)
 		case <-refillTicker.C:
 			triggerRefills(ctx, store, wiz)
 		case <-balanceTicker.C:
@@ -76,8 +77,7 @@ func main() {
 	}
 }
 
-// pollPayments checks all pending STK transactions and fulfills confirmed ones
-func pollPayments(ctx context.Context, store *db.Store, pay *megapay.Client, wiz *smmwiz.Client, tg *tgbotapi.BotAPI, adminIDs []int64) {
+func pollPayments(ctx context.Context, store *db.Store, pay *megapay.Client, wiz *smmwiz.Client, tg *tgbotapi.BotAPI, adminIDs []int64, proofChannelID int64) {
 	txns, err := store.GetPendingSTKTransactions(ctx)
 	if err != nil {
 		log.Printf("getPendingSTK: %v", err)
@@ -96,7 +96,6 @@ func pollPayments(ctx context.Context, store *db.Store, pay *megapay.Client, wiz
 
 		switch status.TransactionStatus {
 		case "Cancelled":
-			// User cancelled — mark order cancelled so we stop polling
 			store.CancelOrder(ctx, txn.OrderID)
 			notifyClient(ctx, store, tg, txn.OrderID, "❌ Payment was cancelled. Send /start to try again.")
 			log.Printf("order %d payment cancelled by user", txn.OrderID)
@@ -106,25 +105,22 @@ func pollPayments(ctx context.Context, store *db.Store, pay *megapay.Client, wiz
 				continue
 			}
 		default:
-			// Still pending
 			continue
 		}
 
-		// Mark confirmed
 		if err := store.ConfirmTransaction(ctx, txn.OrderID, 0); err != nil {
 			log.Printf("confirmTransaction order %d: %v", txn.OrderID, err)
 			continue
 		}
 
-		// Notify admins
-		notifyAdmins(tg, adminIDs, fmt.Sprintf("💰 Payment confirmed for Order #%d — KES %d (receipt: %s)", txn.OrderID, txn.AmountKES, status.TransactionReceipt))
+		notifyAdmins(tg, adminIDs, fmt.Sprintf("💰 Payment confirmed for Order #%d — KES %d (receipt: %s)",
+			txn.OrderID, txn.AmountKES, status.TransactionReceipt))
 
-		// Fulfill order
-		go fulfillOrder(ctx, store, wiz, tg, txn.OrderID)
+		go fulfillOrder(ctx, store, wiz, tg, txn.OrderID, proofChannelID)
 	}
 }
 
-func fulfillOrder(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *tgbotapi.BotAPI, orderID int64) {
+func fulfillOrder(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *tgbotapi.BotAPI, orderID int64, proofChannelID int64) {
 	order, err := store.GetOrder(ctx, orderID)
 	if err != nil {
 		log.Printf("fulfillOrder getOrder %d: %v", orderID, err)
@@ -162,13 +158,12 @@ func fulfillOrder(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *
 
 	store.UpdateOrderStatus(ctx, orderID, models.StatusProcessing, wizIDs)
 
-	// Notify client
 	notifyClient(ctx, store, tg, orderID, fmt.Sprintf(
 		"✅ *Payment confirmed!*\n\nYour order #%d has been placed and delivery has started.\n\nYou'll be notified when it's complete.", orderID,
 	))
 }
 
-func pollOrders(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *tgbotapi.BotAPI) {
+func pollOrders(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *tgbotapi.BotAPI, proofChannelID int64) {
 	orders, err := store.GetProcessingOrders(ctx)
 	if err != nil {
 		log.Printf("pollOrders fetch: %v", err)
@@ -214,13 +209,70 @@ func pollOrders(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *tg
 			continue
 		}
 		store.UpdateOrderStatus(ctx, orderID, models.StatusCompleted, nil)
-		notifyClient(ctx, store, tg, orderID, "🎉 Your order is complete! Check your profile.")
 		log.Printf("order %d completed", orderID)
+
+		// Award referral credit if applicable
+		if referrerTgID, err := store.AwardReferralCredit(ctx, orderID); err != nil {
+			log.Printf("awardReferralCredit order %d: %v", orderID, err)
+		} else if referrerTgID > 0 {
+			send(tg, referrerTgID, "🎉 *Referral bonus!*\n\nYour friend just completed their first order.\nKES 50 credit has been added to your account!")
+			log.Printf("referral credit awarded for order %d → tg %d", orderID, referrerTgID)
+		}
+
+		// Build completion message with optional upsell
+		completionMsg := buildCompletionMessage(orderID, store, ctx)
+		notifyClient(ctx, store, tg, orderID, completionMsg)
+
+		// Social proof channel post
+		if proofChannelID != 0 {
+			order, err := store.GetOrder(ctx, orderID)
+			if err == nil {
+				if pkg, ok := bot.GetPackage(order.PackageID); ok {
+					postSocialProof(tg, proofChannelID, pkg)
+				}
+			}
+		}
 	}
 }
 
+func buildCompletionMessage(orderID int64, store *db.Store, ctx context.Context) string {
+	base := "🎉 *Order complete!*\n\nYour followers are live — check your profile!"
+
+	order, err := store.GetOrder(ctx, orderID)
+	if err != nil {
+		return base
+	}
+
+	upsell, ok := bot.UpsellTarget(order.PackageID)
+	if !ok {
+		return base
+	}
+
+	return base + fmt.Sprintf(
+		"\n\n💥 *Ready for more?*\nUpgrade to *%s* for just *KES %d* and 10× your growth!\n\nTap 🛍 *Shop* to order now.",
+		upsell.Name, upsell.PriceKES,
+	)
+}
+
+func postSocialProof(tg *tgbotapi.BotAPI, channelID int64, pkg models.Package) {
+	emoji := "📱"
+	switch pkg.Platform {
+	case models.PlatformTikTok:
+		emoji = "🎵"
+	case models.PlatformInstagram:
+		emoji = "📸"
+	case models.PlatformYouTube:
+		emoji = "▶️"
+	}
+	text := fmt.Sprintf(
+		"✅ *Another order delivered!*\n\n%s *%s*\n📦 %s\n\n⚡️ Delivered fast. No drops.\n\n🛍 Get yours → @AaPomSMM",
+		emoji, pkg.Name, pkg.Description,
+	)
+	send(tg, channelID, text)
+}
+
 func triggerRefills(ctx context.Context, store *db.Store, wiz *smmwiz.Client) {
-	orders, err := store.GetRefillableOrders(ctx)
+	orders, err := store.GetRefillableOrders(ctx, bot.RefillablePackageIDs())
 	if err != nil {
 		log.Printf("triggerRefills: %v", err)
 		return
@@ -257,17 +309,19 @@ func notifyClient(ctx context.Context, store *db.Store, tg *tgbotapi.BotAPI, ord
 		log.Printf("notifyClient getID %d: %v", orderID, err)
 		return
 	}
-	m := tgbotapi.NewMessage(tgID, text)
-	m.ParseMode = "Markdown"
-	tg.Send(m)
+	send(tg, tgID, text)
 }
 
 func notifyAdmins(tg *tgbotapi.BotAPI, adminIDs []int64, text string) {
 	for _, id := range adminIDs {
-		m := tgbotapi.NewMessage(id, text)
-		m.ParseMode = "Markdown"
-		tg.Send(m)
+		send(tg, id, text)
 	}
+}
+
+func send(tg *tgbotapi.BotAPI, chatID int64, text string) {
+	m := tgbotapi.NewMessage(chatID, text)
+	m.ParseMode = "Markdown"
+	tg.Send(m)
 }
 
 func mustEnv(key string) string {

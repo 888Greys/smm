@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"math/rand"
 
 	"github.com/aapom/smm/internal/models"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,7 +28,16 @@ func (s *Store) Close() {
 	s.pool.Close()
 }
 
-func (s *Store) CreatePendingOrder(ctx context.Context, clientTelegramID int64, packageID, link string, amountKES int) (int64, error) {
+// UpsertClient ensures a client row exists. Safe to call on every /start.
+func (s *Store) UpsertClient(ctx context.Context, telegramID int64) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO clients (telegram_id) VALUES ($1)
+		ON CONFLICT (telegram_id) DO NOTHING
+	`, telegramID)
+	return err
+}
+
+func (s *Store) CreatePendingOrder(ctx context.Context, clientTelegramID int64, packageID, link string, amountKES int, referralCode string) (int64, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -42,6 +52,15 @@ func (s *Store) CreatePendingOrder(ctx context.Context, clientTelegramID int64, 
 	`, clientTelegramID).Scan(&clientID)
 	if err != nil {
 		return 0, fmt.Errorf("upsert client: %w", err)
+	}
+
+	// Wire up referral if provided and not already set
+	if referralCode != "" {
+		tx.Exec(ctx, `
+			UPDATE clients
+			SET referred_by = (SELECT id FROM clients WHERE referral_code = $1)
+			WHERE id = $2 AND referred_by IS NULL
+		`, referralCode, clientID)
 	}
 
 	var orderID int64
@@ -182,18 +201,18 @@ func (s *Store) GetPendingSTKTransactions(ctx context.Context) ([]PendingSTKTran
 	return txns, rows.Err()
 }
 
-func (s *Store) GetRefillableOrders(ctx context.Context) ([]*models.Order, error) {
+func (s *Store) GetRefillableOrders(ctx context.Context, packageIDs []string) ([]*models.Order, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT o.id, o.client_id, o.package_id, o.profile_link, o.total_kes,
 		       o.status, o.wiz_order_ids, o.created_at, o.updated_at
 		FROM orders o
-		WHERE o.package_id = 'follower_booster'
+		WHERE o.package_id = ANY($1::text[])
 		  AND o.status = 'completed'
 		  AND o.created_at <= NOW() - INTERVAL '30 days'
 		  AND NOT EXISTS (
 		    SELECT 1 FROM refill_records r WHERE r.order_id = o.id
 		  )
-	`)
+	`, packageIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -209,4 +228,135 @@ func (s *Store) GetRefillableOrders(ctx context.Context) ([]*models.Order, error
 		orders = append(orders, o)
 	}
 	return orders, rows.Err()
+}
+
+// GetOrCreateReferralCode returns the referral code for the given telegram user,
+// generating one if needed. The client must exist (call UpsertClient first).
+func (s *Store) GetOrCreateReferralCode(ctx context.Context, telegramID int64) (string, error) {
+	var code *string
+	err := s.pool.QueryRow(ctx, `
+		SELECT referral_code FROM clients WHERE telegram_id = $1
+	`, telegramID).Scan(&code)
+	if err != nil {
+		return "", fmt.Errorf("get referral code: %w", err)
+	}
+	if code != nil && *code != "" {
+		return *code, nil
+	}
+
+	// Generate and save
+	newCode := generateReferralCode()
+	_, err = s.pool.Exec(ctx, `
+		UPDATE clients SET referral_code = $1 WHERE telegram_id = $2
+	`, newCode, telegramID)
+	if err != nil {
+		return "", fmt.Errorf("save referral code: %w", err)
+	}
+	return newCode, nil
+}
+
+// GetCreditBalance returns the KES credit balance for a telegram user.
+func (s *Store) GetCreditBalance(ctx context.Context, telegramID int64) (int, error) {
+	var bal int
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(credit_balance_kes, 0) FROM clients WHERE telegram_id = $1
+	`, telegramID).Scan(&bal)
+	return bal, err
+}
+
+// AwardReferralCredit pays KES 50 to the referrer of the order's client (once per referred user).
+// Returns the referrer's Telegram ID so the caller can notify them, or 0 if no referral.
+func (s *Store) AwardReferralCredit(ctx context.Context, orderID int64) (int64, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	// Get referred client and their referrer
+	var referredClientID, referrerClientID int64
+	err = tx.QueryRow(ctx, `
+		SELECT c.id, c.referred_by
+		FROM orders o JOIN clients c ON c.id = o.client_id
+		WHERE o.id = $1 AND c.referred_by IS NOT NULL
+	`, orderID).Scan(&referredClientID, &referrerClientID)
+	if err != nil {
+		return 0, nil // no referral, not an error
+	}
+
+	// Only pay once per referred user
+	var alreadyPaid bool
+	tx.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM referrals WHERE referred_id = $1 AND paid = true)
+	`, referredClientID).Scan(&alreadyPaid)
+	if alreadyPaid {
+		return 0, nil
+	}
+
+	// Credit referrer
+	if _, err = tx.Exec(ctx, `
+		UPDATE clients SET credit_balance_kes = credit_balance_kes + 50 WHERE id = $1
+	`, referrerClientID); err != nil {
+		return 0, err
+	}
+
+	// Record
+	if _, err = tx.Exec(ctx, `
+		INSERT INTO referrals (referrer_id, referred_id, order_id, credit_kes, paid)
+		VALUES ($1, $2, $3, 50, true)
+	`, referrerClientID, referredClientID, orderID); err != nil {
+		return 0, err
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+
+	// Get referrer's telegram ID for notification
+	var referrerTgID int64
+	s.pool.QueryRow(ctx, `SELECT telegram_id FROM clients WHERE id = $1`, referrerClientID).Scan(&referrerTgID)
+	return referrerTgID, nil
+}
+
+// GetStats returns order statistics for the admin dashboard.
+func (s *Store) GetStats(ctx context.Context) (*models.DailyStats, error) {
+	st := &models.DailyStats{}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT o.package_id, COUNT(*), COALESCE(SUM(o.total_kes), 0)
+		FROM orders o
+		JOIN transactions t ON t.order_id = o.id
+		WHERE t.confirmed = true
+		  AND t.confirmed_at >= NOW() - INTERVAL '24 hours'
+		GROUP BY o.package_id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var line models.PackageStatLine
+		if err := rows.Scan(&line.PackageID, &line.OrderCount, &line.RevenueKES); err != nil {
+			return nil, err
+		}
+		st.Lines = append(st.Lines, line)
+	}
+
+	s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM orders WHERE status = 'pending'`).Scan(&st.PendingOrders)
+	s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM orders WHERE status = 'processing'`).Scan(&st.ProcessingOrders)
+	s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM orders WHERE status = 'completed'`).Scan(&st.CompletedOrders)
+	s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM orders`).Scan(&st.TotalOrders)
+
+	return st, rows.Err()
+}
+
+const referralChars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+func generateReferralCode() string {
+	b := make([]byte, 8)
+	for i := range b {
+		b[i] = referralChars[rand.Intn(len(referralChars))]
+	}
+	return string(b)
 }

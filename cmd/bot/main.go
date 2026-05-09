@@ -34,7 +34,12 @@ func main() {
 	pay := megapay.New(mustEnv("MEGAPAY_API_KEY"), mustEnv("MEGAPAY_EMAIL"))
 	adminIDs := parseAdminIDs(mustEnv("ADMIN_TELEGRAM_IDS"))
 
-	b, err := bot.New(mustEnv("TELEGRAM_BOT_TOKEN"), wiz, pay, store, adminIDs)
+	var proofChannelID int64
+	if ch := os.Getenv("SOCIAL_PROOF_CHANNEL_ID"); ch != "" {
+		proofChannelID, _ = strconv.ParseInt(ch, 10, 64)
+	}
+
+	b, err := bot.New(mustEnv("TELEGRAM_BOT_TOKEN"), wiz, pay, store, adminIDs, proofChannelID)
 	if err != nil {
 		log.Fatalf("bot init: %v", err)
 	}
