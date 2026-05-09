@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,9 +22,7 @@ import (
 	"github.com/aapom/smm/internal/bot"
 	"github.com/aapom/smm/internal/db"
 	"github.com/aapom/smm/internal/megapay"
-	"github.com/aapom/smm/internal/models"
 	"github.com/aapom/smm/internal/profile"
-	"github.com/aapom/smm/internal/smmwiz"
 )
 
 func main() {
@@ -34,15 +34,20 @@ func main() {
 	}
 	defer store.Close()
 
-	wiz := smmwiz.New(mustEnv("SMMWIZ_API_KEY"))
 	pay := megapay.New(mustEnv("MEGAPAY_API_KEY"), mustEnv("MEGAPAY_EMAIL"))
 	webhookSecret := os.Getenv("MEGAPAY_WEBHOOK_SECRET")
 	frontendOrigin := os.Getenv("FRONTEND_ORIGIN") // e.g. https://innbucks.org
 
+	// Telegram notifier — uses the main bot token to message admin + clients after payment
+	tg := newTGNotifier(
+		os.Getenv("TELEGRAM_BOT_TOKEN"),
+		parseAdminIDs(os.Getenv("ADMIN_TELEGRAM_IDS")),
+	)
+
 	mux := http.NewServeMux()
 
 	// Webhooks
-	mux.HandleFunc("/webhook/megapay", megapayHandler(store, wiz, webhookSecret))
+	mux.HandleFunc("/webhook/megapay", megapayHandler(store, tg, webhookSecret))
 
 	// REST API
 	mux.HandleFunc("/api/packages", packagesHandler())
@@ -289,7 +294,7 @@ type megapayPayload struct {
 	Signature string  `json:"signature"`
 }
 
-func megapayHandler(store *db.Store, wiz *smmwiz.Client, secret string) http.HandlerFunc {
+func megapayHandler(store *db.Store, tg *tgNotifier, secret string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -331,49 +336,124 @@ func megapayHandler(store *db.Store, wiz *smmwiz.Client, secret string) http.Han
 			return
 		}
 
-		go fulfillOrder(context.Background(), store, wiz, payload.OrderID)
+		// Notify client + admins in background — do NOT auto-fulfill
+		go notifyPaymentConfirmed(context.Background(), store, tg, payload.OrderID, payload.MpesaRef)
 
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "ok")
 	}
 }
 
-func fulfillOrder(ctx context.Context, store *db.Store, wiz *smmwiz.Client, orderID int64) {
+func notifyPaymentConfirmed(ctx context.Context, store *db.Store, tg *tgNotifier, orderID int64, mpesaRef string) {
 	order, err := store.GetOrder(ctx, orderID)
 	if err != nil {
-		log.Printf("fulfillOrder getOrder %d: %v", orderID, err)
+		log.Printf("notifyPaymentConfirmed getOrder %d: %v", orderID, err)
 		return
 	}
 
-	pkg, ok := bot.GetPackage(order.PackageID)
-	if !ok {
-		log.Printf("fulfillOrder unknown package %s", order.PackageID)
+	pkg, _ := bot.GetPackage(order.PackageID)
+	clientTgID, _ := store.GetClientTelegramID(ctx, orderID)
+
+	// Tell the client their payment is in
+	if clientTgID > 0 {
+		tg.send(clientTgID,
+			fmt.Sprintf(
+				"✅ *Payment Confirmed!*\n\n"+
+					"We've received your M-Pesa payment for *%s* (KES %d).\n\n"+
+					"🔧 Our team is reviewing your order and will kick off your boost shortly.\n"+
+					"You'll get a message here the moment delivery starts.\n\n"+
+					"_Order #%d · Ref: %s_",
+				pkg.Name, order.TotalKES, orderID, mpesaRef,
+			), nil)
+	}
+
+	// Alert admins with Fulfill / Reject buttons
+	profileDisplay := order.ProfileLink
+	if len(profileDisplay) > 50 {
+		profileDisplay = profileDisplay[:47] + "..."
+	}
+	adminText := fmt.Sprintf(
+		"💰 *Payment Confirmed — Order #%d*\n\n"+
+			"📦 %s\n"+
+			"💰 KES %d\n"+
+			"🔗 %s\n"+
+			"👤 Client TG: %d\n"+
+			"📱 M-Pesa ref: `%s`\n\n"+
+			"Tap *Fulfill* to send to SMMWiz and start delivery.",
+		orderID, pkg.Name, order.TotalKES, profileDisplay, clientTgID, mpesaRef,
+	)
+	kb := &tgInlineKb{
+		InlineKeyboard: [][]tgInlineBtn{
+			{
+				{Text: "✅ Fulfill Order", CallbackData: fmt.Sprintf("fulfill:%d", orderID)},
+				{Text: "❌ Reject", CallbackData: fmt.Sprintf("reject:%d", orderID)},
+			},
+		},
+	}
+	for _, adminID := range tg.adminIDs {
+		tg.send(adminID, adminText, kb)
+	}
+	log.Printf("order %d payment confirmed, awaiting admin fulfillment", orderID)
+}
+
+// ── Telegram notifier (lightweight — no library, just HTTP) ──────────────────
+
+type tgNotifier struct {
+	token    string
+	adminIDs []int64
+}
+
+type tgInlineKb struct {
+	InlineKeyboard [][]tgInlineBtn `json:"inline_keyboard"`
+}
+
+type tgInlineBtn struct {
+	Text         string `json:"text"`
+	CallbackData string `json:"callback_data"`
+}
+
+func newTGNotifier(token string, adminIDs []int64) *tgNotifier {
+	if token == "" {
+		log.Println("TELEGRAM_BOT_TOKEN not set — admin payment notifications disabled")
+	}
+	return &tgNotifier{token: token, adminIDs: adminIDs}
+}
+
+func (n *tgNotifier) send(chatID int64, text string, kb *tgInlineKb) {
+	if n.token == "" {
 		return
 	}
-
-	var wizIDs []int64
-	for _, comp := range pkg.Components {
-		req := smmwiz.OrderRequest{
-			Service:  comp.ServiceID,
-			Link:     order.ProfileLink,
-			Quantity: comp.Quantity,
-		}
-		if comp.Runs > 0 {
-			req.Runs = comp.Runs
-			req.Interval = comp.Interval
-		}
-
-		resp, err := wiz.AddOrder(req)
-		if err != nil {
-			log.Printf("fulfillOrder AddOrder (order %d service %d): %v", orderID, comp.ServiceID, err)
-			store.UpdateOrderStatus(ctx, orderID, models.StatusFailed, wizIDs)
-			return
-		}
-		wizIDs = append(wizIDs, resp.Order)
+	payload := map[string]any{
+		"chat_id":    chatID,
+		"text":       text,
+		"parse_mode": "Markdown",
 	}
+	if kb != nil {
+		payload["reply_markup"] = kb
+	}
+	body, _ := json.Marshal(payload)
+	url := "https://api.telegram.org/bot" + n.token + "/sendMessage"
+	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		log.Printf("tgNotifier send to %d: %v", chatID, err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		log.Printf("tgNotifier send to %d: status %d: %s", chatID, resp.StatusCode, b)
+	}
+}
 
-	store.UpdateOrderStatus(ctx, orderID, models.StatusProcessing, wizIDs)
-	log.Printf("order %d fulfilled via webhook: wiz IDs %v", orderID, wizIDs)
+func parseAdminIDs(s string) []int64 {
+	var ids []int64
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if id, err := strconv.ParseInt(part, 10, 64); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

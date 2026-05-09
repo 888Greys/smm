@@ -202,6 +202,14 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 		edit.ParseMode = "Markdown"
 		b.api.Send(edit)
 
+	// fulfill: is sent by the server webhook notification — payment already confirmed
+	case strings.HasPrefix(cb.Data, "fulfill:"):
+		if !b.isAdmin(cb.From.ID) {
+			return
+		}
+		b.fulfillApprovedOrder(ctx, chatID, strings.TrimPrefix(cb.Data, "fulfill:"), cb.Message.MessageID)
+
+	// approve: kept for backward compat (manual flow) — re-confirms then fulfills
 	case strings.HasPrefix(cb.Data, "approve:"):
 		if !b.isAdmin(cb.From.ID) {
 			return
@@ -566,7 +574,11 @@ func (b *Bot) handlePhoneSubmission(ctx context.Context, chatID, userID int64, p
 	}
 
 	b.sendText(chatID, fmt.Sprintf(
-		"💳 *VectorBoost — Step 4 of 4*\n\nM-Pesa request sent to `%s`\n\n📱 Check your phone and enter your *M-Pesa PIN* to complete payment.\n\n_Order #%d · KES %d_",
+		"💳 *VectorBoost — Step 4 of 4*\n\n"+
+			"M-Pesa request sent to `%s`\n\n"+
+			"📱 Check your phone and enter your *M-Pesa PIN* to complete payment.\n\n"+
+			"Once confirmed, you'll receive a message here and we'll immediately start working on your profile. 🚀\n\n"+
+			"_Order #%d · KES %d_",
 		phone, orderID, pkg.PriceKES,
 	))
 
@@ -734,6 +746,49 @@ func (b *Bot) notifyAdmins(ctx context.Context, orderID, clientTelegramID int64,
 		msg.ParseMode = "Markdown"
 		b.api.Send(msg)
 	}
+}
+
+// fulfillApprovedOrder handles the fulfill: callback — payment was already confirmed
+// by the MegaPay webhook, so we skip ConfirmTransaction and go straight to SMMWiz.
+func (b *Bot) fulfillApprovedOrder(ctx context.Context, chatID int64, orderIDStr string, msgID int) {
+	var orderID int64
+	fmt.Sscanf(orderIDStr, "%d", &orderID)
+
+	// Lock the buttons immediately so admin can't double-tap
+	edit := tgbotapi.NewEditMessageText(chatID, msgID,
+		fmt.Sprintf("⚡ *Order #%d — Fulfillment started…*\n_Sending to SMMWiz…_", orderID))
+	edit.ParseMode = "Markdown"
+	b.api.Send(edit)
+
+	clientTgID, _ := b.store.GetClientTelegramID(ctx, orderID)
+
+	go func() {
+		b.fulfillOrder(context.Background(), orderID)
+
+		// Tell the client their drip has begun
+		if clientTgID > 0 {
+			pkg := ""
+			if order, err := b.store.GetOrder(context.Background(), orderID); err == nil {
+				if p, ok := GetPackage(order.PackageID); ok {
+					pkg = p.Name
+				}
+			}
+			msg := fmt.Sprintf(
+				"🚀 *Your VectorBoost has started!*\n\n"+
+					"Order #%d (*%s*) is now live on our delivery system.\n\n"+
+					"📈 Followers will start arriving shortly and continue drip-feeding at a safe, organic pace.\n\n"+
+					"_Keep your profile public during delivery. DM @workratew if you have questions._",
+				orderID, pkg,
+			)
+			b.sendText(clientTgID, msg)
+		}
+
+		// Update admin message
+		done := tgbotapi.NewEditMessageText(chatID, msgID,
+			fmt.Sprintf("✅ *Order #%d fulfilled* — submitted to SMMWiz. Client notified.", orderID))
+		done.ParseMode = "Markdown"
+		b.api.Send(done)
+	}()
 }
 
 func (b *Bot) approveOrder(ctx context.Context, chatID, approverID int64, orderIDStr string, msgID int) {
