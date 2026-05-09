@@ -23,11 +23,12 @@ body {
 }
 
 /* Custom scrollbar */
-::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: #07070a; }
-::-webkit-scrollbar-thumb { background: #7c3aed; border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: #7c3aed55; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
 
-/* Gradient text utility */
+/* Gradient text */
 .gradient-text {
   background: linear-gradient(135deg, #a78bfa 0%, #38bdf8 100%);
   -webkit-background-clip: text;
@@ -35,25 +36,44 @@ body {
   background-clip: text;
 }
 
-/* Glow effect */
+/* Glow effects */
 .glow-violet {
-  box-shadow: 0 0 30px rgba(124, 58, 237, 0.3);
+  box-shadow: 0 0 30px rgba(124, 58, 237, 0.35), 0 0 60px rgba(124, 58, 237, 0.1);
 }
 
 .glow-violet-sm {
-  box-shadow: 0 0 12px rgba(124, 58, 237, 0.4);
+  box-shadow: 0 0 14px rgba(124, 58, 237, 0.35);
 }
 
 /* Glass card */
 .glass {
-  background: rgba(15, 15, 23, 0.8);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(13, 13, 20, 0.75);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.065);
 }
 
-/* Shimmer loading */
+/* Shimmer loading skeleton */
 .shimmer {
-  background: linear-gradient(90deg, #16161f 25%, #1e1e2e 50%, #16161f 75%);
+  background: linear-gradient(90deg, #12121a 25%, #1a1a28 50%, #12121a 75%);
   background-size: 200% 100%;
-  animation: shimmer 1.5s linear infinite;
+  animation: shimmer 1.6s linear infinite;
 }
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-14px); }
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(22px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-float    { animation: float 6s ease-in-out infinite; }
+.animate-fade-up  { animation: fadeUp 0.5s ease-out forwards; }
