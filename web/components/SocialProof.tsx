@@ -1,3 +1,5 @@
+'use client'
+
 const proofs = [
   { platform: '🎵 TikTok',    pkg: 'Viral Starter',    time: '2 mins ago',   flag: '🇰🇪' },
   { platform: '📸 Instagram', pkg: 'Quick-Start',       time: '7 mins ago',   flag: '🇺🇬' },
