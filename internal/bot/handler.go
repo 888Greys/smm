@@ -9,13 +9,26 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// State keys stored in memory per chat — replace with Redis/DB for multi-instance
 type sessionState struct {
 	Step      string
 	PackageID string
 }
 
 var sessions = map[int64]*sessionState{}
+
+// Main reply keyboard — always visible at the bottom
+func mainKeyboard() tgbotapi.ReplyKeyboardMarkup {
+	return tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("🛍 Shop"),
+			tgbotapi.NewKeyboardButton("📦 My Orders"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("💬 Support"),
+			tgbotapi.NewKeyboardButton("📋 Rules"),
+		),
+	)
+}
 
 func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) {
 	if update.CallbackQuery != nil {
@@ -35,9 +48,18 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) {
 		b.sendWelcome(chatID)
 		sess.Step = ""
 
-	case msg.Text == "/menu" || msg.Text == "/packages":
+	case msg.Text == "🛍 Shop":
 		b.sendPackageMenu(chatID)
 		sess.Step = ""
+
+	case msg.Text == "📦 My Orders":
+		b.sendText(chatID, "📦 *Your Orders*\n\nNo active orders yet.\n\nTap 🛍 *Shop* to place your first order.")
+
+	case msg.Text == "💬 Support":
+		b.sendText(chatID, "💬 *Support*\n\nFor help with your order, contact us:\n👉 @AaPomSupport\n\nResponse time: within 1 hour.")
+
+	case msg.Text == "📋 Rules":
+		b.sendText(chatID, "📋 *Rules & Info*\n\n✅ Orders are non-refundable once placed\n✅ Delivery starts within 0–1 hours\n✅ Follower Booster includes 30-day refill\n✅ Use real public profile links\n\n⚠️ Private accounts will not be fulfilled")
 
 	case msg.Text == "/balance" && b.isAdmin(msg.From.ID):
 		b.sendBalance(ctx, chatID)
@@ -54,7 +76,6 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 	chatID := cb.Message.Chat.ID
 	sess := b.getSession(chatID)
 
-	// Acknowledge the button tap immediately
 	b.api.Send(tgbotapi.NewCallback(cb.ID, ""))
 
 	switch {
@@ -67,9 +88,11 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 		}
 		sess.PackageID = pkgID
 		sess.Step = "awaiting_link"
+
+		platformIcon := platformEmoji(string(pkg.Platform))
 		b.sendText(chatID, fmt.Sprintf(
-			"*%s* — KES %d\n_%s_\n\nPaste your profile/post link:",
-			pkg.Name, pkg.PriceKES, pkg.Description,
+			"%s *%s*\n💰 KES %d\n📦 %s\n\n✏️ Paste your profile/post link below:",
+			platformIcon, pkg.Name, pkg.PriceKES, pkg.Description,
 		))
 
 	case strings.HasPrefix(cb.Data, "approve:"):
@@ -91,79 +114,80 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 func (b *Bot) handleLinkSubmission(ctx context.Context, chatID, userID int64, link string, sess *sessionState) {
 	link = strings.TrimSpace(link)
 	if !isValidLink(link) {
-		b.sendText(chatID, "That doesn't look like a valid link. Please paste the full URL (e.g. https://instagram.com/yourprofile).")
+		b.sendText(chatID, "⚠️ That doesn't look like a valid link.\n\nPlease paste the full URL, e.g:\n`https://instagram.com/yourprofile`")
 		return
 	}
 
 	pkg, ok := GetPackage(sess.PackageID)
 	if !ok {
-		b.sendText(chatID, "Something went wrong. Please start over with /menu.")
+		b.sendText(chatID, "Something went wrong. Tap 🛍 Shop to start over.")
 		sess.Step = ""
 		return
 	}
 
-	// Create pending order + transaction in DB
 	orderID, err := b.store.CreatePendingOrder(ctx, userID, pkg.ID, link, pkg.PriceKES)
 	if err != nil {
 		log.Printf("createPendingOrder: %v", err)
-		b.sendText(chatID, "Could not create your order. Try again shortly.")
+		b.sendText(chatID, "⚠️ Could not create your order. Please try again.")
 		return
 	}
 
-	// Confirm to client
-	b.sendText(chatID, fmt.Sprintf(
-		"Order received!\n\n*Package:* %s\n*Link:* %s\n*Amount:* KES %d\n\nSend payment via M-Pesa and share the confirmation code here or with our team.",
-		pkg.Name, link, pkg.PriceKES,
-	))
+	platformIcon := platformEmoji(string(pkg.Platform))
+	b.sendTextWithKeyboard(chatID, fmt.Sprintf(
+		"✅ *Order Received!*\n\n%s *%s*\n🔗 %s\n💰 *KES %d*\n\n📲 Send payment via M\\-Pesa to:\n*Till No: XXXXXX*\n\nShare the M\\-Pesa confirmation code with us once paid\\. Your order will be activated within minutes\\.",
+		platformIcon, pkg.Name, link, pkg.PriceKES,
+	), mainKeyboard())
 
-	// Notify admins for approval
 	b.notifyAdmins(ctx, orderID, userID, pkg, link)
 	sess.Step = ""
 }
 
 func (b *Bot) sendWelcome(chatID int64) {
-	text := "Welcome to *AaPom SMM*!\n\nBoost your social media presence in minutes.\n\nUse /menu to see available packages."
-	b.sendText(chatID, text)
+	text := "👋 *Welcome to AaPom SMM!*\n\n🚀 Grow your social media fast and affordably\\.\n\n📱 We deliver real followers, likes \\& views for:\n• Instagram\n• TikTok\n• YouTube\n\nTap *🛍 Shop* to see available packages\\."
+	b.sendTextWithKeyboard(chatID, text, mainKeyboard())
 }
 
 func (b *Bot) sendPackageMenu(chatID int64) {
 	rows := [][]tgbotapi.InlineKeyboardButton{}
 	for _, pkg := range Catalog {
+		icon := platformEmoji(string(pkg.Platform))
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(
-				fmt.Sprintf("%s — KES %d", pkg.Name, pkg.PriceKES),
+				fmt.Sprintf("%s %s — KES %d", icon, pkg.Name, pkg.PriceKES),
 				"pkg:"+pkg.ID,
 			),
 		))
 	}
-	msg := tgbotapi.NewMessage(chatID, "Choose a package:")
+	msg := tgbotapi.NewMessage(chatID, "🛍 *Choose a Package*\n\nAll packages include fast delivery & guaranteed quality:")
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = "MarkdownV2"
 	b.api.Send(msg)
 }
 
 func (b *Bot) sendBalance(ctx context.Context, chatID int64) {
 	bal, err := b.wiz.GetBalance()
 	if err != nil {
-		b.sendText(chatID, fmt.Sprintf("Balance check failed: %v", err))
+		b.sendText(chatID, fmt.Sprintf("⚠️ Balance check failed: %v", err))
 		return
 	}
-	b.sendText(chatID, fmt.Sprintf("SMMWiz balance: *%s %s*", bal.Balance, bal.Currency))
+	b.sendText(chatID, fmt.Sprintf("💰 *SMMWiz Balance*\n\n`%s %s`", bal.Balance, bal.Currency))
 }
 
 func (b *Bot) notifyAdmins(ctx context.Context, orderID, clientTelegramID int64, pkg Package, link string) {
 	text := fmt.Sprintf(
-		"New order #%d\nClient: `%d`\nPackage: *%s* (KES %d)\nLink: %s\n\nApprove once M-Pesa payment is confirmed.",
-		orderID, clientTelegramID, pkg.Name, pkg.PriceKES, link,
+		"🔔 *New Order \\#%d*\n\n👤 Client: `%d`\n📦 %s %s\n💰 KES %d\n🔗 %s\n\n✅ Tap *Approve* once M\\-Pesa payment is confirmed\\.",
+		orderID, clientTelegramID,
+		platformEmoji(string(pkg.Platform)), escapeMarkdown(pkg.Name),
+		pkg.PriceKES, escapeMarkdown(link),
 	)
-	approveBtn := tgbotapi.NewInlineKeyboardButtonData("Approve", fmt.Sprintf("approve:%d", orderID))
-	rejectBtn := tgbotapi.NewInlineKeyboardButtonData("Reject", fmt.Sprintf("reject:%d", orderID))
+	approveBtn := tgbotapi.NewInlineKeyboardButtonData("✅ Approve", fmt.Sprintf("approve:%d", orderID))
+	rejectBtn := tgbotapi.NewInlineKeyboardButtonData("❌ Reject", fmt.Sprintf("reject:%d", orderID))
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(approveBtn, rejectBtn))
 
 	for _, adminID := range b.adminIDs {
 		msg := tgbotapi.NewMessage(adminID, text)
 		msg.ReplyMarkup = keyboard
-		msg.ParseMode = "Markdown"
+		msg.ParseMode = "MarkdownV2"
 		b.api.Send(msg)
 	}
 }
@@ -174,15 +198,14 @@ func (b *Bot) approveOrder(ctx context.Context, chatID, approverID int64, orderI
 
 	if err := b.store.ConfirmTransaction(ctx, orderID, approverID); err != nil {
 		log.Printf("confirmTransaction: %v", err)
-		b.sendText(chatID, "Failed to confirm transaction.")
+		b.sendText(chatID, "⚠️ Failed to confirm transaction.")
 		return
 	}
 
-	// Place all SMMWiz sub-orders asynchronously
 	go b.fulfillOrder(context.Background(), orderID)
 
-	// Edit the admin message to show it's done
-	edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("Order #%d approved. Fulfillment started.", orderID))
+	edit := tgbotapi.NewEditMessageText(chatID, msgID,
+		fmt.Sprintf("✅ Order #%d approved — fulfillment started.", orderID))
 	b.api.Send(edit)
 }
 
@@ -195,13 +218,22 @@ func (b *Bot) rejectOrder(ctx context.Context, chatID, approverID int64, orderID
 		return
 	}
 
-	edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("Order #%d rejected.", orderID))
+	edit := tgbotapi.NewEditMessageText(chatID, msgID,
+		fmt.Sprintf("❌ Order #%d rejected.", orderID))
 	b.api.Send(edit)
 }
 
 func (b *Bot) sendText(chatID int64, text string) {
 	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = "MarkdownV2"
+	b.api.Send(msg)
+}
+
+func (b *Bot) sendTextWithKeyboard(chatID int64, text string, keyboard tgbotapi.ReplyKeyboardMarkup) {
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "MarkdownV2"
+	keyboard.ResizeKeyboard = true
+	msg.ReplyMarkup = keyboard
 	b.api.Send(msg)
 }
 
@@ -223,4 +255,28 @@ func (b *Bot) isAdmin(userID int64) bool {
 
 func isValidLink(link string) bool {
 	return strings.HasPrefix(link, "https://") || strings.HasPrefix(link, "http://")
+}
+
+func platformEmoji(platform string) string {
+	switch platform {
+	case "tiktok":
+		return "🎵"
+	case "instagram":
+		return "📸"
+	case "youtube":
+		return "▶️"
+	default:
+		return "📱"
+	}
+}
+
+func escapeMarkdown(s string) string {
+	replacer := strings.NewReplacer(
+		"_", "\\_", "*", "\\*", "[", "\\[", "]", "\\]",
+		"(", "\\(", ")", "\\)", "~", "\\~", "`", "\\`",
+		">", "\\>", "#", "\\#", "+", "\\+", "-", "\\-",
+		"=", "\\=", "|", "\\|", "{", "\\{", "}", "\\}",
+		".", "\\.", "!", "\\!",
+	)
+	return replacer.Replace(s)
 }
