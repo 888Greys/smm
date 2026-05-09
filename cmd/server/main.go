@@ -42,7 +42,7 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:         ":8080",
+		Addr:         ":8005",
 		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
@@ -52,7 +52,7 @@ func main() {
 	defer stop()
 
 	go func() {
-		log.Println("webhook server listening on :8080")
+		log.Println("webhook server listening on :8005")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server: %v", err)
 		}
