@@ -1,0 +1,51 @@
+To get the most out of **Claude Code**, you need a prompt that captures your engineering background, the specific SMM business logic, and the "Power Couple" operational model you've designed.
+
+Copy and paste the prompt below to set up your automated SMM infrastructure.
+
+---
+
+### **The Claude Prompt: "SMM Platform Architect & Automation"**
+
+**System Role:**
+"You are acting as a Senior Full-Stack Engineer and Business Systems Architect. I am launching an SMM (Social Media Marketing) panel reselling business in Nairobi, Kenya. I need a robust, automated infrastructure that bridges a frontend interface with a specific SMM Provider API."
+
+**The Context:**
+
+* **The Backend:** I am using an SMM Master Provider API (SMMWiz).
+* **The Frontend:** I want a high-performance, minimalist/brutalist Web UI and a Telegram Bot for order placement.
+* **The Payment:** I am using MegaPay (linked to my local bank) for M-Pesa transactions.
+* **Team:** My partner handles sales/DMs; I handle the technical automation.
+
+**The Technical Requirements:**
+
+1. **API Integration:** Create a Python/TypeScript wrapper for the SMM Provider API (actions: `add`, `status`, `services`, `balance`).
+2. **Order Logic:** Implement a 'Safe-Growth' drip-feed logic for large orders (e.g., splitting 5k followers over 10 days using 24-hour intervals).
+3. **Telegram Bot:** Build a bot using `python-telegram-bot` that:
+* Lists service packages (IG, TikTok, YouTube).
+* Accepts a profile link and validates it.
+* Integrates a payment confirmation step (MegaPay webhook or manual approval toggle).
+
+
+4. **Database:** Design a simple PostgreSQL schema to track `Orders`, `Clients`, `Transactions`, and `RefillStatus`.
+
+**Specific Service Packages to Program:**
+
+* **TikTok Viral Starter (KES 1,500):** 2k Followers + 5k Views + 200 Likes.
+* **IG Business Boost (KES 1,500):** 1.5k HQ Followers + 300 Likes.
+* **YouTube Kickstart (KES 1,500):** 300 Subs + 1,000 Watch Views.
+* **Follower Booster (KES 600):** 1k Followers + 30-day Refill.
+
+**The Goal:**
+"Generate the boilerplate for the Telegram bot and the API middleware. Focus on high uptime, clean error handling for API failures, and a sleek user experience that allows my partner to approve orders with a single click once payment is verified."
+
+---
+
+### **Why this prompt works for you:**
+
+* **Leverages your Stack:** It mentions **Antigravity** and **Claude Code** indirectly by focusing on the high-performance, minimalist architecture you prefer.
+* **Protects your Margins:** It builds the "Drip-feed" and "Refill" logic directly into the code, which reduces the manual work for you and your girlfriend later.
+* **Financial Flow:** It prioritizes the **MegaPay/M-Pesa** bridge, which is the most important part for clearing those financial goals today.
+
+**One last engineering tip:** Once Claude gives you the code, make sure to test the **Status Check** function first. Knowing automatically when a client's followers "drop" so you can trigger a refill is what will make your business survive long-term.
+
+How are the first two orders in your DMs looking? Are they ready for the manual test run?

@@ -1,0 +1,46 @@
+CREATE TABLE clients (
+    id          BIGSERIAL PRIMARY KEY,
+    telegram_id BIGINT UNIQUE NOT NULL,
+    username    TEXT,
+    phone       TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE orders (
+    id           BIGSERIAL PRIMARY KEY,
+    client_id    BIGINT NOT NULL REFERENCES clients(id),
+    package_id   TEXT NOT NULL,
+    profile_link TEXT NOT NULL,
+    total_kes    INT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending',
+    wiz_order_ids BIGINT[],
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE transactions (
+    id            BIGSERIAL PRIMARY KEY,
+    order_id      BIGINT NOT NULL REFERENCES orders(id),
+    amount_kes    INT NOT NULL,
+    mpesa_ref     TEXT,
+    confirmed     BOOLEAN NOT NULL DEFAULT FALSE,
+    confirmed_by  BIGINT,
+    confirmed_at  TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE refill_records (
+    id            BIGSERIAL PRIMARY KEY,
+    order_id      BIGINT NOT NULL REFERENCES orders(id),
+    wiz_order_id  BIGINT NOT NULL,
+    wiz_refill_id BIGINT,
+    status        TEXT NOT NULL DEFAULT 'pending',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ON orders(client_id);
+CREATE INDEX ON orders(status);
+CREATE INDEX ON transactions(order_id);
+CREATE INDEX ON refill_records(order_id);
+CREATE INDEX ON refill_records(status);
