@@ -33,6 +33,10 @@ export default function OrderModal({ pkg, onClose }: Props) {
         if (status.status === 'processing' || status.status === 'completed') {
           setStep('success')
           clearInterval(interval)
+          // Fire confetti
+          import('canvas-confetti').then(({ default: confetti }) => {
+            confetti({ particleCount: 140, spread: 80, origin: { y: 0.55 }, colors: ['#7c3aed', '#06b6d4', '#a78bfa', '#38bdf8', '#ffffff'] })
+          })
         } else if (status.status === 'failed' || status.status === 'cancelled') {
           setErrorMsg('Payment was not completed. Please try again.')
           setStep('error')

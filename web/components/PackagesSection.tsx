@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Package } from '@/lib/types'
 import { getPackages } from '@/lib/api'
 import OrderModal from './OrderModal'
@@ -47,9 +47,29 @@ function PackageCard({ pkg, onOrder }: { pkg: Package; onOrder: (p: Package) => 
   const cfg = platformConfig[pkg.platform as keyof typeof platformConfig] || platformConfig.tiktok
   const { Icon } = cfg
   const t = tier(pkg.price_kes)
+  const cardRef = useRef<HTMLDivElement>(null)
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const el = cardRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const x = (e.clientX - rect.left) / rect.width - 0.5
+    const y = (e.clientY - rect.top) / rect.height - 0.5
+    el.style.transform = `perspective(900px) rotateY(${x * 12}deg) rotateX(${-y * 12}deg) translateZ(6px)`
+  }
+
+  const handleMouseLeave = () => {
+    if (cardRef.current) cardRef.current.style.transform = ''
+  }
 
   return (
-    <div className="relative glass rounded-2xl p-6 flex flex-col gap-4 hover:border-violet-500/40 transition-all duration-300 group hover:translate-y-[-2px] hover:shadow-2xl hover:shadow-violet-900/20">
+    <div
+      ref={cardRef}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      className="relative glass rounded-2xl p-6 flex flex-col gap-4 hover:border-violet-500/40 transition-[border-color,box-shadow] duration-300 group hover:shadow-2xl hover:shadow-violet-900/20"
+      style={{ transformStyle: 'preserve-3d', transition: 'transform 0.15s ease, border-color 0.3s, box-shadow 0.3s' }}
+    >
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className={`w-11 h-11 rounded-xl ${cfg.bg} flex items-center justify-center shadow-lg flex-shrink-0`}>

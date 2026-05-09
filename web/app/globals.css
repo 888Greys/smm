@@ -6,13 +6,9 @@
   --font-inter: 'Inter', system-ui, sans-serif;
 }
 
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
-html {
-  scroll-behavior: smooth;
-}
+html { scroll-behavior: smooth; }
 
 body {
   background-color: #07070a;
@@ -22,7 +18,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom scrollbar */
+/* Scrollbar */
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: #07070a; }
 ::-webkit-scrollbar-thumb { background: #7c3aed55; border-radius: 3px; }
@@ -36,29 +32,37 @@ body {
   background-clip: text;
 }
 
-/* Glow effects */
-.glow-violet {
-  box-shadow: 0 0 30px rgba(124, 58, 237, 0.35), 0 0 60px rgba(124, 58, 237, 0.1);
-}
-
-.glow-violet-sm {
-  box-shadow: 0 0 14px rgba(124, 58, 237, 0.35);
-}
+/* Glow */
+.glow-violet     { box-shadow: 0 0 30px rgba(124,58,237,0.35), 0 0 60px rgba(124,58,237,0.1); }
+.glow-violet-sm  { box-shadow: 0 0 14px rgba(124,58,237,0.35); }
 
 /* Glass card */
 .glass {
-  background: rgba(13, 13, 20, 0.75);
+  background: rgba(13,13,20,0.75);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.065);
+  border: 1px solid rgba(255,255,255,0.065);
 }
 
-/* Shimmer loading skeleton */
+/* Shimmer skeleton */
 .shimmer {
   background: linear-gradient(90deg, #12121a 25%, #1a1a28 50%, #12121a 75%);
   background-size: 200% 100%;
   animation: shimmer 1.6s linear infinite;
 }
+
+/* ── Scroll reveal ────────────────────────────────────────────────────── */
+.reveal {
+  opacity: 0;
+  transform: translateY(36px);
+  transition: opacity 0.75s cubic-bezier(0.16,1,0.3,1), transform 0.75s cubic-bezier(0.16,1,0.3,1);
+}
+.reveal.revealed {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Keyframes ────────────────────────────────────────────────────────── */
 
 @keyframes shimmer {
   0%   { background-position: -200% 0; }
@@ -75,5 +79,38 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* Cursor blink for typewriter */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+/* Animated mesh blobs */
+@keyframes meshMove1 {
+  0%, 100% { transform: translate(0px,   0px)   scale(1);    }
+  33%       { transform: translate(80px, -50px)  scale(1.12); }
+  66%       { transform: translate(-40px, 60px)  scale(0.9);  }
+}
+@keyframes meshMove2 {
+  0%, 100% { transform: translate(0px,   0px)   scale(1);    }
+  33%       { transform: translate(-90px, 40px)  scale(1.15); }
+  66%       { transform: translate(50px, -70px)  scale(0.95); }
+}
+@keyframes meshMove3 {
+  0%, 100% { transform: translate(0px,   0px)   scale(1);    }
+  33%       { transform: translate(40px,  80px)  scale(0.9);  }
+  66%       { transform: translate(-60px,-30px)  scale(1.1);  }
+}
+
+/* Live toast */
+@keyframes toastIn {
+  from { transform: translateY(80px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+@keyframes toastOut {
+  from { transform: translateY(0);    opacity: 1; }
+  to   { transform: translateY(80px); opacity: 0; }
+}
+
 .animate-float    { animation: float 6s ease-in-out infinite; }
-.animate-fade-up  { animation: fadeUp 0.5s ease-out forwards; }
+.animate-fade-up  { animation: fadeUp 0.6s ease-out forwards; opacity: 0; }
