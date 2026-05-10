@@ -92,30 +92,32 @@ func applyAutoDrip(comp models.PackageComponent) models.PackageComponent {
 	return comp
 }
 
-func (b *Bot) fulfillOrder(ctx context.Context, orderID int64) {
-	order, err := b.store.GetOrder(ctx, orderID)
+// FulfillOrder places all SMMWiz sub-orders for orderID.
+// sendText is used to send progress messages to the client (may be nil for web orders).
+// notifier may be nil if no admin bot is configured.
+func FulfillOrder(ctx context.Context, store Store, wiz *smmwiz.Client, sendText func(int64, string), notifier *AdminNotifier, orderID int64) {
+	order, err := store.GetOrder(ctx, orderID)
 	if err != nil {
-		log.Printf("fulfillOrder getOrder %d: %v", orderID, err)
+		log.Printf("FulfillOrder getOrder %d: %v", orderID, err)
 		return
 	}
 
 	pkg, ok := GetPackage(order.PackageID)
 	if !ok {
-		log.Printf("fulfillOrder unknown package %s", order.PackageID)
+		log.Printf("FulfillOrder unknown package %s", order.PackageID)
 		return
 	}
 
-	// Look up client Telegram ID for progress notifications (0 = web order, skip)
-	clientTgID, _ := b.store.GetClientTelegramID(ctx, orderID)
+	clientTgID, _ := store.GetClientTelegramID(ctx, orderID)
 	total := len(pkg.Components)
-	multiStep := total > 1 && clientTgID > 0
+	multiStep := total > 1 && clientTgID > 0 && sendText != nil
 
 	var wizIDs []int64
 	for i, comp := range pkg.Components {
 		comp = applyAutoDrip(comp)
 
 		if multiStep {
-			b.sendRaw(clientTgID, fmt.Sprintf(
+			sendText(clientTgID, fmt.Sprintf(
 				"⚡ *Placing component %d/%d…*\n_%s_",
 				i+1, total, componentLabel(comp),
 			))
@@ -131,12 +133,12 @@ func (b *Bot) fulfillOrder(ctx context.Context, orderID int64) {
 			req.Interval = comp.Interval
 		}
 
-		resp, err := b.wiz.AddOrder(req)
+		resp, err := wiz.AddOrder(req)
 		if err != nil {
-			log.Printf("fulfillOrder AddOrder (order %d service %d): %v", orderID, comp.ServiceID, err)
-			b.store.UpdateOrderStatus(ctx, orderID, models.StatusFailed, wizIDs)
-			if clientTgID > 0 {
-				b.sendRaw(clientTgID, "⚠️ Your order could not be placed. Please contact @workratew for support.")
+			log.Printf("FulfillOrder AddOrder (order %d service %d): %v", orderID, comp.ServiceID, err)
+			store.UpdateOrderStatus(ctx, orderID, models.StatusFailed, wizIDs)
+			if clientTgID > 0 && sendText != nil {
+				sendText(clientTgID, "⚠️ Your order could not be placed. Please contact @workratew for support.")
 			}
 			return
 		}
@@ -144,11 +146,17 @@ func (b *Bot) fulfillOrder(ctx context.Context, orderID int64) {
 		log.Printf("order %d → wiz order %d placed (service %d qty %d)", orderID, resp.Order, comp.ServiceID, comp.Quantity)
 	}
 
-	if err := b.store.UpdateOrderStatus(ctx, orderID, models.StatusProcessing, wizIDs); err != nil {
-		log.Printf("fulfillOrder updateStatus %d: %v", orderID, err)
+	if err := store.UpdateOrderStatus(ctx, orderID, models.StatusProcessing, wizIDs); err != nil {
+		log.Printf("FulfillOrder updateStatus %d: %v", orderID, err)
 	}
 
-	b.notifier.NotifyOrderFulfilled(orderID, pkg, wizIDs)
+	if notifier != nil {
+		notifier.NotifyOrderFulfilled(orderID, pkg, wizIDs)
+	}
+}
+
+func (b *Bot) fulfillOrder(ctx context.Context, orderID int64) {
+	FulfillOrder(ctx, b.store, b.wiz, b.sendRaw, b.notifier, orderID)
 }
 
 // componentLabel returns a human-readable label for a package component.

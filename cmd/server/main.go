@@ -23,6 +23,7 @@ import (
 	"github.com/aapom/smm/internal/db"
 	"github.com/aapom/smm/internal/megapay"
 	"github.com/aapom/smm/internal/profile"
+	"github.com/aapom/smm/internal/smmwiz"
 )
 
 func main() {
@@ -35,6 +36,7 @@ func main() {
 	defer store.Close()
 
 	pay := megapay.New(mustEnv("MEGAPAY_API_KEY"), mustEnv("MEGAPAY_EMAIL"))
+	wiz := smmwiz.New(mustEnv("SMMWIZ_API_KEY"))
 	webhookSecret := os.Getenv("MEGAPAY_WEBHOOK_SECRET")
 	frontendOrigin := os.Getenv("FRONTEND_ORIGIN") // e.g. https://innbucks.org
 
@@ -51,7 +53,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	// Webhooks
-	mux.HandleFunc("/webhook/megapay", megapayHandler(store, tg, webhookSecret))
+	mux.HandleFunc("/webhook/megapay", megapayHandler(store, wiz, tg, webhookSecret))
 
 	// REST API
 	mux.HandleFunc("/api/packages", packagesHandler())
@@ -298,7 +300,7 @@ type megapayPayload struct {
 	Signature string  `json:"signature"`
 }
 
-func megapayHandler(store *db.Store, tg *tgNotifier, secret string) http.HandlerFunc {
+func megapayHandler(store *db.Store, wiz *smmwiz.Client, tg *tgNotifier, secret string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -340,65 +342,72 @@ func megapayHandler(store *db.Store, tg *tgNotifier, secret string) http.Handler
 			return
 		}
 
-		// Notify client + admins in background — do NOT auto-fulfill
-		go notifyPaymentConfirmed(context.Background(), store, tg, payload.OrderID, payload.MpesaRef)
+		go autoFulfill(context.Background(), store, wiz, tg, payload.OrderID, payload.MpesaRef)
 
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "ok")
 	}
 }
 
-func notifyPaymentConfirmed(ctx context.Context, store *db.Store, tg *tgNotifier, orderID int64, mpesaRef string) {
+func autoFulfill(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *tgNotifier, orderID int64, mpesaRef string) {
 	order, err := store.GetOrder(ctx, orderID)
 	if err != nil {
-		log.Printf("notifyPaymentConfirmed getOrder %d: %v", orderID, err)
+		log.Printf("autoFulfill getOrder %d: %v", orderID, err)
 		return
 	}
 
 	pkg, _ := bot.GetPackage(order.PackageID)
 	clientTgID, _ := store.GetClientTelegramID(ctx, orderID)
 
-	// Tell the client their payment is in (via main bot — that's where they chatted)
+	// Tell client payment is confirmed and boost is starting immediately
 	if clientTgID > 0 {
 		tg.sendClient(clientTgID, fmt.Sprintf(
 			"✅ *Payment Confirmed!*\n\n"+
-				"We've received your M-Pesa payment for *%s* (KES %d).\n\n"+
-				"🔧 Our team is reviewing your order and will kick off your boost shortly.\n"+
-				"You'll get a message here the moment delivery starts.\n\n"+
+				"M-Pesa payment received for *%s* (KES %d).\n\n"+
+				"🚀 Your boost is being placed right now — followers will start arriving shortly.\n\n"+
 				"_Order #%d · Ref: %s_",
 			pkg.Name, order.TotalKES, orderID, mpesaRef,
 		))
 	}
 
-	// Alert admin via admin bot with Fulfill / Reject buttons
+	// Notify admin that auto-fulfillment is starting
 	profileDisplay := order.ProfileLink
 	if len(profileDisplay) > 50 {
 		profileDisplay = profileDisplay[:47] + "..."
 	}
-	tg.sendAdmin(
-		fmt.Sprintf(
-			"💰 *Payment Confirmed — Order #%d*\n\n"+
-				"📦 %s\n"+
-				"💰 KES %d\n"+
-				"🔗 %s\n"+
-				"👤 Client TG: `%d`\n"+
-				"📱 M-Pesa ref: `%s`\n"+
-				"🕐 %s\n\n"+
-				"Tap *Fulfill* to send to SMMWiz.",
-			orderID, pkg.Name, order.TotalKES,
-			profileDisplay, clientTgID, mpesaRef,
-			time.Now().Format("02 Jan 15:04 MST"),
-		),
-		&tgInlineKb{
-			InlineKeyboard: [][]tgInlineBtn{
-				{
-					{Text: "✅ Fulfill Order", CallbackData: fmt.Sprintf("fulfill:%d", orderID)},
-					{Text: "❌ Reject", CallbackData: fmt.Sprintf("reject:%d", orderID)},
-				},
-			},
-		},
-	)
-	log.Printf("order %d payment confirmed, admin notified via admin bot", orderID)
+	tg.sendAdmin(fmt.Sprintf(
+		"💰 *Payment Confirmed — Order #%d*\n\n"+
+			"📦 %s\n"+
+			"💰 KES %d · M-Pesa: `%s`\n"+
+			"🔗 %s\n"+
+			"👤 Client TG: `%d`\n"+
+			"🕐 %s\n\n"+
+			"⚡ Auto-fulfillment started…",
+		orderID, pkg.Name, order.TotalKES, mpesaRef,
+		profileDisplay, clientTgID,
+		time.Now().Format("02 Jan 15:04 MST"),
+	), nil)
+
+	// Place the SMMWiz orders — sendText delivers multi-step progress to client
+	sendText := func(chatID int64, text string) { tg.sendClient(chatID, text) }
+	bot.FulfillOrder(ctx, store, wiz, sendText, nil, orderID)
+
+	// Notify client that the boost has started
+	if clientTgID > 0 {
+		if refreshed, err := store.GetOrder(ctx, orderID); err == nil {
+			if string(refreshed.Status) == "processing" {
+				tg.sendClient(clientTgID, fmt.Sprintf(
+					"🚀 *Your VectorBoost has started!*\n\n"+
+						"Order #%d (*%s*) is now live on our delivery system.\n\n"+
+						"📈 Followers will start arriving shortly and continue drip-feeding at a safe, organic pace.\n\n"+
+						"_Keep your profile public during delivery. DM @workratew if you have questions._",
+					orderID, pkg.Name,
+				))
+			}
+		}
+	}
+
+	log.Printf("order %d auto-fulfilled via megapay webhook", orderID)
 }
 
 // ── Telegram notifier (lightweight — no library, just HTTP) ──────────────────
