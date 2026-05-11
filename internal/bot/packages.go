@@ -23,6 +23,15 @@ var Catalog = []models.Package{
 
 	// ── TikTok ───────────────────────────────────────────────────────────────
 	{
+		ID: "tiktok_test_boost", Name: "TikTok Test Boost",
+		Platform: models.PlatformTikTok, Category: "tiktok",
+		PriceKES: 5, MarginKES: 4, Refillable: true,
+		Description: "10 Real Followers — live system test",
+		Components: []models.PackageComponent{
+			{ServiceID: 18612, Quantity: 10},
+		},
+	},
+	{
 		ID: "tiktok_flex", Name: "TikTok Quick-Start",
 		Platform: models.PlatformTikTok, Category: "tiktok",
 		PriceKES: 500, MarginKES: 414, Refillable: true,
