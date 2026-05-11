@@ -52,7 +52,7 @@ func main() {
 	}
 
 	paymentTicker := time.NewTicker(10 * time.Second)
-	orderTicker := time.NewTicker(30 * time.Minute)
+	orderTicker := time.NewTicker(2 * time.Minute)
 	refillTicker := time.NewTicker(24 * time.Hour)
 	balanceTicker := time.NewTicker(12 * time.Hour)
 
@@ -188,27 +188,49 @@ func pollOrders(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *tg
 		return
 	}
 
-	orderComplete := map[int64]bool{}
-	orderFailed := map[int64]bool{}
+	type orderProgress struct {
+		total     int
+		completed int
+		failed    bool
+		order     *models.Order
+	}
+
+	progress := map[int64]*orderProgress{}
+	for _, o := range orders {
+		progress[o.ID] = &orderProgress{
+			total: len(o.WizOrderIDs),
+			order: o,
+		}
+	}
 
 	for wizIDStr, s := range statuses {
 		var wizID int64
 		fmt.Sscanf(wizIDStr, "%d", &wizID)
 		orderID := wizToOrder[wizID]
+		p, ok := progress[orderID]
+		if !ok {
+			continue
+		}
 
 		switch s.Status {
 		case "Completed":
-			orderComplete[orderID] = true
-		case "Partial", "Canceled":
-			orderFailed[orderID] = true
+			p.completed++
+		case "Partial", "Canceled", "Cancelled":
+			p.failed = true
 		}
 	}
 
-	for orderID := range orderComplete {
-		if orderFailed[orderID] {
+	for orderID, p := range progress {
+		if p.failed {
+			store.UpdateOrderStatus(ctx, orderID, models.StatusFailed, p.order.WizOrderIDs)
+			notifyClient(ctx, store, tg, orderID, "⚠️ Your order needs attention. Please DM @workratew with your Order # and we'll sort it out.")
 			continue
 		}
-		store.UpdateOrderStatus(ctx, orderID, models.StatusCompleted, nil)
+		if p.completed != p.total {
+			continue
+		}
+
+		store.UpdateOrderStatus(ctx, orderID, models.StatusCompleted, p.order.WizOrderIDs)
 		log.Printf("order %d completed", orderID)
 
 		// Award referral credit if applicable
@@ -236,7 +258,7 @@ func pollOrders(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *tg
 }
 
 func buildCompletionMessage(orderID int64, store *db.Store, ctx context.Context) string {
-	base := "🎉 *Order complete!*\n\nYour followers are live — check your profile!"
+	base := fmt.Sprintf("🎉 *Order #%d is complete!*\n\nYour boost has finished delivering. Check your profile now — your followers/views should be live.", orderID)
 
 	order, err := store.GetOrder(ctx, orderID)
 	if err != nil {
