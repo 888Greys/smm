@@ -17,7 +17,7 @@ import (
 	"github.com/aapom/smm/internal/db"
 	"github.com/aapom/smm/internal/megapay"
 	"github.com/aapom/smm/internal/models"
-	"github.com/aapom/smm/internal/smmwiz"
+	"github.com/aapom/smm/internal/smmpanel"
 )
 
 func main() {
@@ -32,7 +32,7 @@ func main() {
 	}
 	defer store.Close()
 
-	wiz := smmwiz.New(mustEnv("SMMWIZ_API_KEY"))
+	wiz := smmpanel.New(mustEnv("MTP_API_KEY"))
 	pay := megapay.New(mustEnv("MEGAPAY_API_KEY"), mustEnv("MEGAPAY_EMAIL"))
 
 	tgAPI, err := tgbotapi.NewBotAPI(mustEnv("TELEGRAM_BOT_TOKEN"))
@@ -77,7 +77,7 @@ func main() {
 	}
 }
 
-func pollPayments(ctx context.Context, store *db.Store, pay *megapay.Client, wiz *smmwiz.Client, tg *tgbotapi.BotAPI, adminIDs []int64, proofChannelID int64) {
+func pollPayments(ctx context.Context, store *db.Store, pay *megapay.Client, wiz *smmpanel.Client, tg *tgbotapi.BotAPI, adminIDs []int64, proofChannelID int64) {
 	txns, err := store.GetPendingSTKTransactions(ctx)
 	if err != nil {
 		log.Printf("getPendingSTK: %v", err)
@@ -120,7 +120,7 @@ func pollPayments(ctx context.Context, store *db.Store, pay *megapay.Client, wiz
 	}
 }
 
-func fulfillOrder(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *tgbotapi.BotAPI, orderID int64, proofChannelID int64) {
+func fulfillOrder(ctx context.Context, store *db.Store, wiz *smmpanel.Client, tg *tgbotapi.BotAPI, orderID int64, proofChannelID int64) {
 	order, err := store.GetOrder(ctx, orderID)
 	if err != nil {
 		log.Printf("fulfillOrder getOrder %d: %v", orderID, err)
@@ -135,7 +135,7 @@ func fulfillOrder(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *
 
 	var wizIDs []int64
 	for _, comp := range pkg.Components {
-		req := smmwiz.OrderRequest{
+		req := smmpanel.OrderRequest{
 			Service:  comp.ServiceID,
 			Link:     order.ProfileLink,
 			Quantity: comp.Quantity,
@@ -163,7 +163,7 @@ func fulfillOrder(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *
 	))
 }
 
-func pollOrders(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *tgbotapi.BotAPI, proofChannelID int64) {
+func pollOrders(ctx context.Context, store *db.Store, wiz *smmpanel.Client, tg *tgbotapi.BotAPI, proofChannelID int64) {
 	orders, err := store.GetProcessingOrders(ctx)
 	if err != nil {
 		log.Printf("pollOrders fetch: %v", err)
@@ -293,7 +293,7 @@ func postSocialProof(tg *tgbotapi.BotAPI, channelID int64, pkg models.Package) {
 	send(tg, channelID, text)
 }
 
-func triggerRefills(ctx context.Context, store *db.Store, wiz *smmwiz.Client) {
+func triggerRefills(ctx context.Context, store *db.Store, wiz *smmpanel.Client) {
 	orders, err := store.GetRefillableOrders(ctx, bot.RefillablePackageIDs())
 	if err != nil {
 		log.Printf("triggerRefills: %v", err)
@@ -312,7 +312,7 @@ func triggerRefills(ctx context.Context, store *db.Store, wiz *smmwiz.Client) {
 	}
 }
 
-func checkBalance(ctx context.Context, wiz *smmwiz.Client, tg *tgbotapi.BotAPI, adminIDs []int64, threshold float64) {
+func checkBalance(ctx context.Context, wiz *smmpanel.Client, tg *tgbotapi.BotAPI, adminIDs []int64, threshold float64) {
 	bal, err := wiz.GetBalance()
 	if err != nil {
 		log.Printf("balance check: %v", err)

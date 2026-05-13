@@ -1,4 +1,4 @@
-package smmwiz
+package smmpanel
 
 import (
 	"encoding/json"
@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const apiURL = "https://smmwiz.com/api/v2"
+const apiURL = "https://morethanpanel.com/api/v2"
 
 type Client struct {
 	apiKey     string
@@ -149,7 +149,7 @@ func (c *Client) AddOrder(req OrderRequest) (*OrderResponse, error) {
 		return nil, err
 	}
 	if resp.Error != "" {
-		return nil, fmt.Errorf("smmwiz: %s", resp.Error)
+		return nil, fmt.Errorf("smmpanel: %s", resp.Error)
 	}
 	return &resp, nil
 }
@@ -163,7 +163,7 @@ func (c *Client) GetStatus(orderID int64) (*StatusResponse, error) {
 		return nil, err
 	}
 	if resp.Error != "" {
-		return nil, fmt.Errorf("smmwiz: %s", resp.Error)
+		return nil, fmt.Errorf("smmpanel: %s", resp.Error)
 	}
 	return &resp, nil
 }
@@ -198,7 +198,7 @@ func (c *Client) Refill(orderID int64) (*RefillResponse, error) {
 		return nil, err
 	}
 	if resp.Error != "" {
-		return nil, fmt.Errorf("smmwiz: %s", resp.Error)
+		return nil, fmt.Errorf("smmpanel: %s", resp.Error)
 	}
 	return &resp, nil
 }
@@ -223,7 +223,7 @@ func (c *Client) GetRefillStatus(refillID int64) (*RefillStatusResponse, error) 
 		return nil, err
 	}
 	if resp.Error != "" {
-		return nil, fmt.Errorf("smmwiz: %s", resp.Error)
+		return nil, fmt.Errorf("smmpanel: %s", resp.Error)
 	}
 	return &resp, nil
 }
@@ -258,7 +258,7 @@ func (c *Client) GetBalance() (*BalanceResponse, error) {
 		return nil, err
 	}
 	if resp.Error != "" {
-		return nil, fmt.Errorf("smmwiz: %s", resp.Error)
+		return nil, fmt.Errorf("smmpanel: %s", resp.Error)
 	}
 	return &resp, nil
 }
@@ -275,17 +275,17 @@ func (c *Client) baseParams(action string) url.Values {
 func (c *Client) post(params url.Values, dest any) error {
 	resp, err := c.httpClient.Post(apiURL, "application/x-www-form-urlencoded", strings.NewReader(params.Encode()))
 	if err != nil {
-		return fmt.Errorf("smmwiz http: %w", err)
+		return fmt.Errorf("smmpanel http: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("smmwiz read: %w", err)
+		return fmt.Errorf("smmpanel read: %w", err)
 	}
 
 	if err := json.Unmarshal(body, dest); err != nil {
-		return fmt.Errorf("smmwiz parse: %w (body: %s)", err, string(body))
+		return fmt.Errorf("smmpanel parse: %w (body: %s)", err, string(body))
 	}
 	return nil
 }

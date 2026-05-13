@@ -13,7 +13,7 @@ import (
 	"github.com/aapom/smm/internal/bot"
 	"github.com/aapom/smm/internal/db"
 	"github.com/aapom/smm/internal/megapay"
-	"github.com/aapom/smm/internal/smmwiz"
+	"github.com/aapom/smm/internal/smmpanel"
 )
 
 func main() {
@@ -30,7 +30,7 @@ func main() {
 	}
 	defer store.Close()
 
-	wiz := smmwiz.New(mustEnv("SMMWIZ_API_KEY"))
+	wiz := smmpanel.New(mustEnv("MTP_API_KEY"))
 	pay := megapay.New(mustEnv("MEGAPAY_API_KEY"), mustEnv("MEGAPAY_EMAIL"))
 	adminIDs := parseAdminIDs(mustEnv("ADMIN_TELEGRAM_IDS"))
 

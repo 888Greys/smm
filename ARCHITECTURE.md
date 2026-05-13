@@ -285,9 +285,9 @@ After Phase 2 (MegaPay webhook), the partner's one tap is also removed.
 
 ```
 TELEGRAM_BOT_TOKEN      — from @BotFather
-SMMWIZ_API_KEY          — from smmwiz.com dashboard
+MTP_API_KEY             — from morethanpanel.com dashboard (API key)
 ADMIN_TELEGRAM_IDS      — your ID + partner's ID, comma-separated
 DATABASE_URL            — postgres://user:pass@host:5432/smm
 MEGAPAY_WEBHOOK_SECRET  — for Phase 2 only
-BALANCE_ALERT_THRESHOLD — SMMWiz balance floor (e.g. 10.00 USD)
+BALANCE_ALERT_THRESHOLD — morethanpanel wallet floor (e.g. 10.00 USD)
 ```

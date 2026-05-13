@@ -23,7 +23,7 @@ import (
 	"github.com/aapom/smm/internal/db"
 	"github.com/aapom/smm/internal/megapay"
 	"github.com/aapom/smm/internal/profile"
-	"github.com/aapom/smm/internal/smmwiz"
+	"github.com/aapom/smm/internal/smmpanel"
 )
 
 func main() {
@@ -36,7 +36,7 @@ func main() {
 	defer store.Close()
 
 	pay := megapay.New(mustEnv("MEGAPAY_API_KEY"), mustEnv("MEGAPAY_EMAIL"))
-	wiz := smmwiz.New(mustEnv("SMMWIZ_API_KEY"))
+	wiz := smmpanel.New(mustEnv("MTP_API_KEY"))
 	webhookSecret := os.Getenv("MEGAPAY_WEBHOOK_SECRET")
 	frontendOrigin := os.Getenv("FRONTEND_ORIGIN") // e.g. https://innbucks.org
 
@@ -300,7 +300,7 @@ type megapayPayload struct {
 	Signature string  `json:"signature"`
 }
 
-func megapayHandler(store *db.Store, wiz *smmwiz.Client, tg *tgNotifier, secret string) http.HandlerFunc {
+func megapayHandler(store *db.Store, wiz *smmpanel.Client, tg *tgNotifier, secret string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -349,7 +349,7 @@ func megapayHandler(store *db.Store, wiz *smmwiz.Client, tg *tgNotifier, secret 
 	}
 }
 
-func autoFulfill(ctx context.Context, store *db.Store, wiz *smmwiz.Client, tg *tgNotifier, orderID int64, mpesaRef string) {
+func autoFulfill(ctx context.Context, store *db.Store, wiz *smmpanel.Client, tg *tgNotifier, orderID int64, mpesaRef string) {
 	order, err := store.GetOrder(ctx, orderID)
 	if err != nil {
 		log.Printf("autoFulfill getOrder %d: %v", orderID, err)

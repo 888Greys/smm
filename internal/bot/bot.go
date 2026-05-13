@@ -8,7 +8,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/aapom/smm/internal/megapay"
 	"github.com/aapom/smm/internal/models"
-	"github.com/aapom/smm/internal/smmwiz"
+	"github.com/aapom/smm/internal/smmpanel"
 )
 
 type Store interface {
@@ -30,7 +30,7 @@ type Package = models.Package
 
 type Bot struct {
 	api            *tgbotapi.BotAPI
-	wiz            *smmwiz.Client
+	wiz            *smmpanel.Client
 	pay            *megapay.Client
 	store          Store
 	adminIDs       []int64
@@ -38,7 +38,7 @@ type Bot struct {
 	notifier       *AdminNotifier // nil = disabled
 }
 
-func New(token string, wiz *smmwiz.Client, pay *megapay.Client, store Store, adminIDs []int64, proofChannelID int64, notifier *AdminNotifier) (*Bot, error) {
+func New(token string, wiz *smmpanel.Client, pay *megapay.Client, store Store, adminIDs []int64, proofChannelID int64, notifier *AdminNotifier) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, err
@@ -95,7 +95,7 @@ func applyAutoDrip(comp models.PackageComponent) models.PackageComponent {
 // FulfillOrder places all SMMWiz sub-orders for orderID.
 // sendText is used to send progress messages to the client (may be nil for web orders).
 // notifier may be nil if no admin bot is configured.
-func FulfillOrder(ctx context.Context, store Store, wiz *smmwiz.Client, sendText func(int64, string), notifier *AdminNotifier, orderID int64) {
+func FulfillOrder(ctx context.Context, store Store, wiz *smmpanel.Client, sendText func(int64, string), notifier *AdminNotifier, orderID int64) {
 	order, err := store.GetOrder(ctx, orderID)
 	if err != nil {
 		log.Printf("FulfillOrder getOrder %d: %v", orderID, err)
@@ -123,7 +123,7 @@ func FulfillOrder(ctx context.Context, store Store, wiz *smmwiz.Client, sendText
 			))
 		}
 
-		req := smmwiz.OrderRequest{
+		req := smmpanel.OrderRequest{
 			Service:  comp.ServiceID,
 			Link:     order.ProfileLink,
 			Quantity: comp.Quantity,
