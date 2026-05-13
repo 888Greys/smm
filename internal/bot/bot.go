@@ -73,7 +73,7 @@ func (b *Bot) Run(ctx context.Context) {
 }
 
 // followerServices are SMMWiz service IDs that deliver followers (auto drip-feed eligible).
-var followerServices = map[int]bool{18612: true, 20888: true}
+var followerServices = map[int]bool{5760: true, 5440: true}
 
 // applyAutoDrip adds drip-feed parameters to follower components with >1000 quantity
 // that don't already have explicit runs set. Rate: ~300-500 followers/day.
@@ -162,13 +162,13 @@ func (b *Bot) fulfillOrder(ctx context.Context, orderID int64) {
 // componentLabel returns a human-readable label for a package component.
 func componentLabel(comp models.PackageComponent) string {
 	labels := map[int]string{
-		18612: "TikTok Followers",
-		19967: "TikTok Views",
-		12350: "TikTok Likes",
-		20888: "Instagram Followers",
-		19909: "Instagram Likes",
-		9727:  "YouTube Subscribers",
-		19646: "YouTube Views",
+		5760: "TikTok Followers",
+		9121: "TikTok Views",
+		2699: "TikTok Likes",
+		5440: "Instagram Followers",
+		2916: "Instagram Likes",
+		7494: "YouTube Subscribers",
+		6003: "YouTube Views",
 	}
 	if l, ok := labels[comp.ServiceID]; ok {
 		return fmt.Sprintf("%s × %d", l, comp.Quantity)

@@ -524,7 +524,7 @@ func (b *Bot) sendSafetyBriefing(chatID int64, pkg Package, link string) {
 }
 
 func totalFollowersInPackage(pkg Package) int {
-	followerServices := map[int]bool{18612: true, 20888: true}
+	followerServices := map[int]bool{5760: true, 5440: true}
 	total := 0
 	for _, comp := range pkg.Components {
 		if followerServices[comp.ServiceID] {

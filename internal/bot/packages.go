@@ -2,15 +2,14 @@ package bot
 
 import "github.com/aapom/smm/internal/models"
 
-// Service IDs and wholesale rates (USD/1000) from SMMWiz:
-// TikTok Followers ID:18612 — $1.08 — Real, 30D Refill
-// TikTok Views     ID:19967 — $0.06 — No Drop, Instant
-// TikTok Likes     ID:12350 — $0.09 — HQ Real
-// IG Followers     ID:20888 — $0.55 — Real HQ, 30D Refill
-// IG Likes         ID:19909 — $0.09 — Low Drop
-// YT Subscribers   ID:9727  — $0.33 — Instant
-// YT Views         ID:19646 — $0.34 — Lifetime Guaranteed
-// Margins at 130 KES/USD. Drip-feed auto-applies in fulfillOrder for followers >1000.
+// Service IDs and wholesale rates from morethanpanel.com (USD/1000 at 130 KES/USD):
+// TikTok Followers ID:5760  — $2.44 — 30 Day Refill, 5-10K/Day
+// TikTok Views     ID:9121  — $0.04 — 30 Day Refill, 10-100K/Day
+// TikTok Likes     ID:2699  — $0.32 — 30 Day Refill, 5-50K/Day
+// IG Followers     ID:5440  — $0.35 — 30 Day Refill, 10-50K/Day
+// IG Likes         ID:2916  — $0.10 — 30 Day Refill, 5-10K/Day
+// YT Subscribers   ID:7494  — $0.70 — No Refill, 10-50K/Day
+// YT Views         ID:6003  — $0.41 — Lifetime Guaranteed
 
 var Catalog = []models.Package{
 	{
@@ -18,40 +17,40 @@ var Catalog = []models.Package{
 		Platform: models.PlatformTikTok, Category: "tiktok",
 		PriceKES: 1, MarginKES: 1,
 		Description: "Test order — KES 1 only",
-		Components:  []models.PackageComponent{{ServiceID: 19967, Quantity: 100}},
+		Components:  []models.PackageComponent{{ServiceID: 9121, Quantity: 100}},
 	},
 
 	// ── TikTok ───────────────────────────────────────────────────────────────
 	{
 		ID: "tiktok_flex", Name: "TikTok Quick-Start",
 		Platform: models.PlatformTikTok, Category: "tiktok",
-		PriceKES: 500, MarginKES: 414, Refillable: true,
+		PriceKES: 500, MarginKES: 331, Refillable: true,
 		Description: "500 Real Followers + 2,000 Views",
 		Components: []models.PackageComponent{
-			{ServiceID: 18612, Quantity: 500},
-			{ServiceID: 19967, Quantity: 2000},
+			{ServiceID: 5760, Quantity: 500},
+			{ServiceID: 9121, Quantity: 2000},
 		},
 	},
 	{
 		ID: "tiktok_starter", Name: "TikTok Starter",
 		Platform: models.PlatformTikTok, Category: "tiktok",
-		PriceKES: 1000, MarginKES: 791, Refillable: true,
+		PriceKES: 1000, MarginKES: 589, Refillable: true,
 		Description: "1,200 Followers + 5,000 Views + 100 Likes",
 		Components: []models.PackageComponent{
-			{ServiceID: 18612, Quantity: 1200},
-			{ServiceID: 19967, Quantity: 5000},
-			{ServiceID: 12350, Quantity: 100},
+			{ServiceID: 5760, Quantity: 1200},
+			{ServiceID: 9121, Quantity: 5000},
+			{ServiceID: 2699, Quantity: 100},
 		},
 	},
 	{
 		ID: "tiktok_viral_starter", Name: "TikTok Viral Starter",
 		Platform: models.PlatformTikTok, Category: "tiktok",
-		PriceKES: 1500, MarginKES: 1178, Refillable: true,
+		PriceKES: 1500, MarginKES: 831, Refillable: true,
 		Description: "2,000 Followers + 5,000 Views + 200 Likes",
 		Components: []models.PackageComponent{
-			{ServiceID: 18612, Quantity: 2000},
-			{ServiceID: 19967, Quantity: 5000},
-			{ServiceID: 12350, Quantity: 200},
+			{ServiceID: 5760, Quantity: 2000},
+			{ServiceID: 9121, Quantity: 5000},
+			{ServiceID: 2699, Quantity: 200},
 		},
 	},
 
@@ -59,40 +58,40 @@ var Catalog = []models.Package{
 	{
 		ID: "ig_quick_start", Name: "IG Quick-Start",
 		Platform: models.PlatformInstagram, Category: "instagram",
-		PriceKES: 500, MarginKES: 463, Refillable: true,
+		PriceKES: 500, MarginKES: 476, Refillable: true,
 		Description: "500 Real Followers + 100 Likes",
 		Components: []models.PackageComponent{
-			{ServiceID: 20888, Quantity: 500},
-			{ServiceID: 19909, Quantity: 100},
+			{ServiceID: 5440, Quantity: 500},
+			{ServiceID: 2916, Quantity: 100},
 		},
 	},
 	{
 		ID: "ig_business_boost", Name: "IG Business Boost",
 		Platform: models.PlatformInstagram, Category: "instagram",
-		PriceKES: 800, MarginKES: 725, Refillable: true,
+		PriceKES: 800, MarginKES: 751, Refillable: true,
 		Description: "1,000 Followers + 300 Likes",
 		Components: []models.PackageComponent{
-			{ServiceID: 20888, Quantity: 1000},
-			{ServiceID: 19909, Quantity: 300},
+			{ServiceID: 5440, Quantity: 1000},
+			{ServiceID: 2916, Quantity: 300},
 		},
 	},
 	{
 		ID: "follower_booster", Name: "Follower Booster",
 		Platform: models.PlatformInstagram, Category: "instagram",
-		PriceKES: 600, MarginKES: 528, Refillable: true,
+		PriceKES: 600, MarginKES: 555, Refillable: true,
 		Description: "1,000 Followers + 30-day Refill Guarantee",
 		Components: []models.PackageComponent{
-			{ServiceID: 20888, Quantity: 1000},
+			{ServiceID: 5440, Quantity: 1000},
 		},
 	},
 	{
 		ID: "ig_celebrity_pack", Name: "IG Celebrity Pack",
 		Platform: models.PlatformInstagram, Category: "instagram",
-		PriceKES: 2500, MarginKES: 2131, Refillable: true,
+		PriceKES: 2500, MarginKES: 2260, Refillable: true,
 		Description: "5,000 Followers + 1,000 Likes (5-day drip delivery)",
 		Components: []models.PackageComponent{
-			{ServiceID: 20888, Quantity: 5000, Runs: 5, Interval: 1440},
-			{ServiceID: 19909, Quantity: 1000},
+			{ServiceID: 5440, Quantity: 5000, Runs: 5, Interval: 1440},
+			{ServiceID: 2916, Quantity: 1000},
 		},
 	},
 
@@ -100,11 +99,11 @@ var Catalog = []models.Package{
 	{
 		ID: "youtube_kickstart", Name: "YouTube Kickstart",
 		Platform: models.PlatformYouTube, Category: "youtube",
-		PriceKES: 1500, MarginKES: 1443,
+		PriceKES: 1500, MarginKES: 1419,
 		Description: "300 Subscribers + 1,000 Views",
 		Components: []models.PackageComponent{
-			{ServiceID: 9727, Quantity: 300},
-			{ServiceID: 19646, Quantity: 1000},
+			{ServiceID: 7494, Quantity: 300},
+			{ServiceID: 6003, Quantity: 1000},
 		},
 	},
 
@@ -112,12 +111,12 @@ var Catalog = []models.Package{
 	{
 		ID: "viral_creator_combo", Name: "Viral Creator Combo",
 		Platform: models.PlatformTikTok, Category: "combo",
-		PriceKES: 2500, MarginKES: 1995, Refillable: true,
+		PriceKES: 2500, MarginKES: 1476, Refillable: true,
 		Description: "3,000 TikTok Followers + 10,000 Views + 500 Likes (drip-fed for safety)",
 		Components: []models.PackageComponent{
-			{ServiceID: 18612, Quantity: 3000, Runs: 6, Interval: 1440}, // ~500/day
-			{ServiceID: 19967, Quantity: 10000},
-			{ServiceID: 12350, Quantity: 500},
+			{ServiceID: 5760, Quantity: 3000, Runs: 6, Interval: 1440}, // ~500/day
+			{ServiceID: 9121, Quantity: 10000},
+			{ServiceID: 2699, Quantity: 500},
 		},
 	},
 }
