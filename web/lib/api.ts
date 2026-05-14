@@ -1,6 +1,6 @@
 import { Package, CreateOrderResponse, OrderStatus, ProfileInfo } from './types'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://api.innbucks.org'
+const API = (process.env.NEXT_PUBLIC_API_URL || 'https://api.innbucks.org').replace(/\/$/, '')
 
 export async function getPackages(): Promise<Package[]> {
   const res = await fetch(`${API}/api/packages`, { next: { revalidate: 300 } })
