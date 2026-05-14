@@ -24,7 +24,7 @@ var Catalog = []models.Package{
 	{
 		ID: "tiktok_flex", Name: "TikTok Quick-Start",
 		Platform: models.PlatformTikTok, Category: "tiktok",
-		PriceKES: 1, MarginKES: 1, Refillable: true,
+		PriceKES: 500, MarginKES: 331, Refillable: true,
 		Description: "500 Real Followers + 2,000 Views",
 		Components: []models.PackageComponent{
 			{ServiceID: 5760, Quantity: 500},
