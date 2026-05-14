@@ -94,12 +94,20 @@ func main() {
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
 
-func corsMiddleware(next http.Handler, origin string) http.Handler {
+func corsMiddleware(next http.Handler, originsEnv string) http.Handler {
+	allowed := map[string]bool{}
+	for _, o := range strings.Split(originsEnv, ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			allowed[o] = true
+		}
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-		} else {
+		reqOrigin := r.Header.Get("Origin")
+		if len(allowed) == 0 {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
+		} else if allowed[reqOrigin] {
+			w.Header().Set("Access-Control-Allow-Origin", reqOrigin)
+			w.Header().Set("Vary", "Origin")
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
