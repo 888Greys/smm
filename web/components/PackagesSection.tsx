@@ -135,9 +135,7 @@ export default function PackagesSection({ initialPackages }: { initialPackages: 
   const [filter, setFilter] = useState<string>('all')
 
   useEffect(() => {
-    if (packages.length === 0) {
-      getPackages().then(setPackages).catch(() => {})
-    }
+    getPackages().then(setPackages).catch(() => {})
   }, [])
 
   const platforms = ['all', 'tiktok', 'instagram', 'youtube']
