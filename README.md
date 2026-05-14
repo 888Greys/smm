@@ -64,30 +64,25 @@ journalctl -u smm-worker --no-pager | tail -30
 
 ```bash
 cd ~/smm && git fetch origin && git reset --hard origin/main \
+  && go mod tidy \
   && go build -o /opt/smm/bin/server ./cmd/server \
   && go build -o /opt/smm/bin/bot ./cmd/bot \
   && go build -o /opt/smm/bin/worker ./cmd/worker \
   && systemctl restart smm-server smm-bot smm-worker
 ```
 
-If `go mod tidy` is needed (you'll see a warning):
-```bash
-go mod tidy && go build -o /opt/smm/bin/server ./cmd/server \
-  && go build -o /opt/smm/bin/bot ./cmd/bot \
-  && go build -o /opt/smm/bin/worker ./cmd/worker \
-  && systemctl restart smm-server smm-bot smm-worker
-```
+> `go mod tidy` is always required before building — skipping it causes a build error warning and the binary won't compile with the latest dependencies.
 
 Partial restarts (when only one service changed):
 ```bash
 # API only
-go build -o /opt/smm/bin/server ./cmd/server && systemctl restart smm-server
+go mod tidy && go build -o /opt/smm/bin/server ./cmd/server && systemctl restart smm-server
 
 # Bot only
-go build -o /opt/smm/bin/bot ./cmd/bot && systemctl restart smm-bot
+go mod tidy && go build -o /opt/smm/bin/bot ./cmd/bot && systemctl restart smm-bot
 
 # Worker only
-go build -o /opt/smm/bin/worker ./cmd/worker && systemctl restart smm-worker
+go mod tidy && go build -o /opt/smm/bin/worker ./cmd/worker && systemctl restart smm-worker
 ```
 
 ---
