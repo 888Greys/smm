@@ -21,6 +21,19 @@ func NewStore(ctx context.Context, connString string) (*Store, error) {
 	if err := pool.Ping(ctx); err != nil {
 		return nil, fmt.Errorf("db ping: %w", err)
 	}
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS bot_sessions (
+			telegram_id   BIGINT PRIMARY KEY,
+			step          TEXT NOT NULL DEFAULT '',
+			package_id    TEXT NOT NULL DEFAULT '',
+			profile_link  TEXT NOT NULL DEFAULT '',
+			referral_code TEXT NOT NULL DEFAULT '',
+			scan_msg_id   INT  NOT NULL DEFAULT 0,
+			updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`); err != nil {
+		return nil, fmt.Errorf("migrate bot_sessions: %w", err)
+	}
 	return &Store{pool: pool}, nil
 }
 
@@ -352,6 +365,33 @@ func (s *Store) GetStats(ctx context.Context) (*models.DailyStats, error) {
 }
 
 const referralChars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+func (s *Store) SaveSession(ctx context.Context, telegramID int64, step, packageID, profileLink, referralCode string, scanMsgID int) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO bot_sessions (telegram_id, step, package_id, profile_link, referral_code, scan_msg_id, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, NOW())
+		ON CONFLICT (telegram_id) DO UPDATE SET
+			step          = EXCLUDED.step,
+			package_id    = EXCLUDED.package_id,
+			profile_link  = EXCLUDED.profile_link,
+			referral_code = EXCLUDED.referral_code,
+			scan_msg_id   = EXCLUDED.scan_msg_id,
+			updated_at    = NOW()
+	`, telegramID, step, packageID, profileLink, referralCode, scanMsgID)
+	return err
+}
+
+func (s *Store) LoadSession(ctx context.Context, telegramID int64) (step, packageID, profileLink, referralCode string, scanMsgID int, err error) {
+	err = s.pool.QueryRow(ctx, `
+		SELECT step, package_id, profile_link, referral_code, scan_msg_id
+		FROM bot_sessions
+		WHERE telegram_id = $1 AND updated_at > NOW() - INTERVAL '24 hours'
+	`, telegramID).Scan(&step, &packageID, &profileLink, &referralCode, &scanMsgID)
+	if err != nil {
+		return "", "", "", "", 0, nil // not found or expired — return empty
+	}
+	return
+}
 
 func generateReferralCode() string {
 	b := make([]byte, 8)

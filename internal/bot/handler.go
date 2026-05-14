@@ -6,6 +6,7 @@ import (
 	"log"
 	"regexp"
 	"strings"
+	"sync"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/aapom/smm/internal/profile"
@@ -19,7 +20,7 @@ type sessionState struct {
 	ScanMsgID    int
 }
 
-var sessions = map[int64]*sessionState{}
+var sessions sync.Map // map[int64]*sessionState
 
 var phoneRegex = regexp.MustCompile(`^(?:254|\+254|0)(7\d{8}|1\d{8})$`)
 
@@ -53,7 +54,8 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) {
 
 	msg := update.Message
 	chatID := msg.Chat.ID
-	sess := b.getSession(chatID)
+	sess := b.getSession(ctx, chatID)
+	defer b.saveSession(context.Background(), chatID, sess)
 
 	log.Printf("msg from %d: %q", chatID, msg.Text)
 
@@ -115,7 +117,8 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) {
 
 func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 	chatID := cb.Message.Chat.ID
-	sess := b.getSession(chatID)
+	sess := b.getSession(ctx, chatID)
+	defer b.saveSession(context.Background(), chatID, sess)
 
 	b.api.Send(tgbotapi.NewCallback(cb.ID, ""))
 
@@ -348,7 +351,7 @@ func (b *Bot) handleLinkSubmission(ctx context.Context, chatID, userID int64, in
 func (b *Bot) runProfileScan(_ context.Context, chatID int64, scanMsgID int, platform, username, profileLink, _ string) {
 	info, err := profile.Lookup(platform, username)
 
-	sess := b.getSession(chatID)
+	sess := b.getSession(context.Background(), chatID)
 
 	if err != nil || info == nil {
 		b.editScanMessage(chatID, scanMsgID, fmt.Sprintf(
@@ -358,6 +361,7 @@ func (b *Bot) runProfileScan(_ context.Context, chatID int64, scanMsgID int, pla
 		), true)
 		if sess.Step == "awaiting_profile_confirm" {
 			sess.ProfileLink = profileLink
+			b.saveSession(context.Background(), chatID, sess)
 		}
 		return
 	}
@@ -367,6 +371,7 @@ func (b *Bot) runProfileScan(_ context.Context, chatID int64, scanMsgID int, pla
 		sess.Step = "awaiting_link"
 		sess.ProfileLink = ""
 		sess.ScanMsgID = 0
+		b.saveSession(context.Background(), chatID, sess)
 
 		name := info.Name
 		if name == "" {
@@ -851,11 +856,28 @@ func (b *Bot) sendTextWithKeyboard(chatID int64, text string, keyboard tgbotapi.
 	}
 }
 
-func (b *Bot) getSession(chatID int64) *sessionState {
-	if sessions[chatID] == nil {
-		sessions[chatID] = &sessionState{}
+func (b *Bot) getSession(ctx context.Context, chatID int64) *sessionState {
+	if v, ok := sessions.Load(chatID); ok {
+		return v.(*sessionState)
 	}
-	return sessions[chatID]
+	// Cache miss — try to restore from DB
+	step, pkgID, profileLink, refCode, scanMsgID, _ := b.store.LoadSession(ctx, chatID)
+	sess := &sessionState{
+		Step:         step,
+		PackageID:    pkgID,
+		ProfileLink:  profileLink,
+		ReferralCode: refCode,
+		ScanMsgID:    scanMsgID,
+	}
+	sessions.Store(chatID, sess)
+	return sess
+}
+
+func (b *Bot) saveSession(ctx context.Context, chatID int64, sess *sessionState) {
+	sessions.Store(chatID, sess)
+	if err := b.store.SaveSession(ctx, chatID, sess.Step, sess.PackageID, sess.ProfileLink, sess.ReferralCode, sess.ScanMsgID); err != nil {
+		log.Printf("saveSession %d: %v", chatID, err)
+	}
 }
 
 func (b *Bot) isAdmin(userID int64) bool {

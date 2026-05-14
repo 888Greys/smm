@@ -24,6 +24,8 @@ type Store interface {
 	GetOrCreateReferralCode(ctx context.Context, telegramID int64) (string, error)
 	GetCreditBalance(ctx context.Context, telegramID int64) (int, error)
 	GetStats(ctx context.Context) (*models.DailyStats, error)
+	SaveSession(ctx context.Context, telegramID int64, step, packageID, profileLink, referralCode string, scanMsgID int) error
+	LoadSession(ctx context.Context, telegramID int64) (step, packageID, profileLink, referralCode string, scanMsgID int, err error)
 }
 
 type Package = models.Package
